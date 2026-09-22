@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Budget Techniques</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Context Budget Techniques</h1>
+  <p class="standfirst">Four ways to keep a long-running agent's window small, what each
+  costs, and the two different failures a growing window produces. Print it and keep it next
+  to the tool surface card.</p>
+  <p class="meta">
+    <span>Reference 05</span><span class="sep">&middot;</span>
+    <span>Context engineering</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-22</span>
+  </p>
+</header>
+
+<h2>Two failures, one window</h2>
+
+<table>
+  <thead><tr><th></th><th>What grows</th><th>Visible on the bill?</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Token growth</strong></td>
+      <td>Dollars, latency, per-call size &mdash; roughly the sum of every prior turn, resent
+      on every call</td>
+      <td>Yes &mdash; read it off <code>usage.input_tokens</code></td>
+    </tr>
+    <tr>
+      <td><strong>Context rot</strong></td>
+      <td>Recall accuracy, as tokens fill the window and n&sup2; attention gets spread thinner</td>
+      <td>No &mdash; a run can be cheap and still wrong</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note why">
+  <span class="label">The rule underneath both</span>
+  <p>"Good context engineering means finding the smallest possible set of high-signal tokens
+  that maximize the likelihood of some desired outcome." Same instinct as Lesson 03's tool
+  results, scaled to the whole window: prompt, schemas, messages, everything.</p>
+</div>
+
+<h2>The routing table</h2>
+
+<table>
+  <thead><tr><th>Technique</th><th>Reach for it when</th><th>What it costs</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Compaction</strong></td>
+      <td>One continuous run is nearing its context window limit and isn't finished</td>
+      <td>Whatever the summary drops &mdash; lossy on purpose</td>
+    </tr>
+    <tr>
+      <td><strong>Structured note-taking</strong><br><span class="tag">agentic memory</span></td>
+      <td>State needs to survive a reset you can see coming, hours or sessions later</td>
+      <td>Discipline &mdash; must be written before it's needed, not after</td>
+    </tr>
+    <tr>
+      <td><strong>Sub-agent architectures</strong></td>
+      <td>A sub-task generates messy scratch work the parent doesn't need to see</td>
+      <td>Coordination overhead; a second window to manage per sub-agent</td>
+    </tr>
+    <tr>
+      <td><strong>Just-in-time retrieval</strong></td>
+      <td>Only a small slice of a large corpus is ever needed per call</td>
+      <td>Latency &mdash; runtime exploration is slower than data that's already loaded</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>They compose. A long-running coding agent plausibly uses all four at once: notes for
+decisions made hours ago, compaction when a session nears its limit, sub-agents for isolated
+investigations, just-in-time retrieval so the whole codebase is never loaded at once.</p>
+
+<h2>Quick disambiguation</h2>
+
+<ul>
+  <li><strong>Compaction vs. notes:</strong> compaction is reactive &mdash; it fires because the
+  window is full. Notes are proactive &mdash; written because you know a reset is coming, before
+  the window is anywhere near full.</li>
+  <li><strong>Sub-agents vs. just-in-time retrieval:</strong> sub-agents isolate a messy
+  <em>process</em> (search, exploration) so its noise never reaches the parent. JIT retrieval
+  defers loading a <em>known record</em> until a tool call actually needs it. One hides work;
+  the other delays a fetch.</li>
+  <li><strong>Compaction vs. restart:</strong> compaction keeps the run going with a summary in
+  place of history. A restart from zero throws away everything, including facts nothing else
+  captured &mdash; the more expensive failure, and the reason checkpointing matters on long runs.</li>
+</ul>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic: Effective Context Engineering for AI Agents</a> &mdash; all four techniques, context rot, the attention-budget framing</li>
+    <li><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic: How We Built Our Multi-Agent Research System</a> &mdash; sub-agent isolation and checkpointing in production</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0005-context-engineering.html">Lesson 05: Context Engineering</a>
+    <a href="0004-error-message-patterns.html">Reference: Error Message Patterns</a>
+    <a href="0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

@@ -150,3 +150,42 @@ _Avoid_: Error handling, exception strategy
 > `is_error: true` tells the model its tool is broken, so it spends the [retry budget] on a call
 > that already succeeded. Return it as an ordinary result, stated in words — and never let a
 > real failure come back looking like an empty answer.
+
+**Context window**:
+The finite set of tokens the model can attend to in one call — the current cap on what "context
+engineering" manages. A larger window raises the ceiling; it does not remove the need to curate
+what's in it.
+_Avoid_: Token limit, prompt window
+
+**Context rot**:
+The measured decline in a model's ability to accurately recall information as the number of
+tokens in its context window increases — distinct from token cost, and invisible on the bill.
+_Avoid_: Context overflow, running out of context
+
+**Compaction**:
+Summarizing a conversation nearing its context window limit and reinitiating with the summary
+in place of the full history. Reactive and lossy by design — the summary decides what gets
+forgotten.
+_Avoid_: Truncation, trimming, context clearing
+
+**Structured note-taking**:
+The agent regularly writes notes to persistent storage outside the context window, so state
+survives a reset. Also called agentic memory. Proactive, unlike [compaction] — written before
+it's needed, not after the window is full.
+_Avoid_: Scratchpad (the mechanism, not the strategy), logging
+
+**Sub-agent architecture**:
+Delegating a sub-task to a separate agent with its own clean context window, which reports back
+a synthesis rather than its full scratch work. Isolates a messy process; contrast with
+[just-in-time retrieval], which defers loading a known record rather than hiding a process.
+_Avoid_: Multi-agent system (too broad — this is one specific use of it), orchestrator-workers
+(the [workflow] pattern this technique resembles but is not, when the model decides when to
+delegate)
+
+**Just-in-time retrieval**:
+Keeping lightweight identifiers in context and fetching full records only when a tool call
+needs them, instead of pre-loading a large corpus up front. Trades latency (a round trip per
+fetch) for window space.
+_Avoid_: Lazy loading (the general CS term; use this when speaking specifically about agent
+context), RAG (retrieval-augmented generation is the broader technique; this is retrieval
+timed to need, inside an agent loop)

@@ -39,7 +39,7 @@
 2. ✅ Workflow vs. agent: the decision, and when to say no  ← taught; build task not yet logged
 3. ✅ Tool surface design: what makes a tool an agent can actually use
 4. ✅ Tool results & error messages: steering the agent through failure
-5. Context engineering: the window as a budget
+5. ✅ Context engineering: the window as a budget
 6. Memory: within-session vs. cross-session state
 7. Guardrails: permissions, gating, prompt injection, the harness's job
 8. Evals: error analysis first, then tests, then judges
@@ -48,20 +48,30 @@
 
 ## Open loops (check before the next lesson)
 
-- **The written-artefact experiment.** Lesson 04 is the first lesson where the deliverable is
-  text, not a number: `practice/04-tool-errors/NOTES.md` §2 asks for three error strings
-  *before* any code change, and the lesson's closing `.ask` asks him to paste them into the
-  terminal. This is the fix for the three-lesson pattern where measured steps get done and
-  written ones do not. If §2 is still blank next session, the pattern is stronger than the
-  task design and the next lesson should make him dictate the text in conversation rather
-  than write it in a file.
-- Lesson 02's missing "input that breaks the workflow" was folded into Lesson 04's opening as
-  a 60-second recall box with a reveal, rather than chased. Consider it closed either way —
-  do not ask for it a third time.
-- `practice/03-tool-surface/NOTES.md` still has the consolidation trade-off answered with the
-  question the tool *was* built for. Lesson 04's step 5 ("which failure should have been a
-  change to the tool, not a message?") is the same skill — naming what a design choice costs.
-  Watch whether it lands this time.
+- **The written-artefact pattern, resolved (for now).** `practice/04-tool-errors/NOTES.md` §2
+  was still blank at the start of the 2026-09-22 session — fourth occurrence. Per the plan
+  above, checked live in conversation instead of asking for a fifth file. Verdict: the
+  *decisions* were right (is_error judgment on all three cases, including the harder
+  design-bug read on Marcus) but even in free-form chat he gave verdicts, not the literal
+  `tool_result` strings the lesson asked for — so the pattern is "skips the production step,"
+  not "won't open a file." See `learning-records/0005-lesson-04-closed-in-conversation.md`.
+  Next time a lesson's deliverable is a literal string (an error message, a tool description,
+  a summary), ask for the sentence itself in the room and don't accept a verdict as a
+  substitute — but don't re-litigate Lesson 04 again; that's closed.
+- The one-liner in step 5 didn't land: he named Marcus's case (2) as "should have been a tool
+  change," but the intended answer was the unknown-name case (1) — the one that's currently
+  *written as* an error message and could be deleted entirely with `.lower()` on both sides.
+  Marcus's case was never an error message to begin with, so "moved from message to tool
+  change" doesn't quite apply to it; it needed a schema change for a different reason. Worth a
+  sharper recall question later: "which error can be deleted vs. which correct-looking result
+  actually needed a redesign" — these are adjacent but distinct, and the distinction blurred
+  for him. Do not chase further now.
+- Lesson 05's build task (`practice/05-context-window/`) asks him to pick his own trigger
+  condition for compaction and defend it, then check whether it silently drops a fact needed
+  two turns later. Whether he notices the drop *without being told to check* — versus only
+  after step 4 explicitly asks — is worth reading closely next session; it's the same
+  "did I actually verify, or did I assume the fix worked" muscle from Lesson 04's null-guard
+  trap.
 
 ## New asset (2026-09-20)
 

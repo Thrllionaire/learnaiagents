@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Context Engineering</h1>
+  <p class="standfirst">Everything you have written into the transcript so far &mdash; schemas,
+  results, errors, retries &mdash; competes for one finite budget. This lesson is about who
+  decides what leaves.</p>
+  <p class="meta">
+    <span>Lesson 05</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory before anything new.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>An agent run resends the full message
+  history on every turn. Across an <em>N</em>-turn run, roughly how do total input tokens
+  grow?</p>
+  <div class="opts">
+    <button class="opt">Linearly &mdash; one turn's worth each time</button>
+    <button class="opt" data-correct>Faster than linear &mdash; each turn resends everything before it</button>
+    <button class="opt">It doesn't grow; only the newest turn is sent</button>
+    <button class="opt">It shrinks, because old tool results are dropped automatically</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right &mdash; this is the arithmetic behind the 22.6&times; you measured in Lesson 02, generalised to any run length. Turn 5 doesn't cost 5&times; turn 1's tokens; it costs roughly 1+2+3+4+5&times; turn 1's tokens, because turns 1 through 4 are still in the window."
+    data-when-wrong="Nothing is dropped automatically &mdash; that is the whole problem this lesson is about. Every call resends the entire transcript so far, so turn 5 of a run carries turns 1 through 4 with it. Cost grows roughly with the sum of everything sent so far, not with the newest turn alone.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>Lesson 03's &ldquo;high-signal
+  context&rdquo; was about what a <em>tool result</em> should contain. What's the equivalent
+  principle for the system prompt, the tool schemas, and the messages &mdash; everything
+  <em>you</em> put in the window?</p>
+  <div class="opts">
+    <button class="opt">Include as much as possible, so nothing is ever missing</button>
+    <button class="opt" data-correct>Find the smallest set of high-signal tokens that gets the outcome</button>
+    <button class="opt">Let retrieval decide; never write anything by hand</button>
+    <button class="opt">Match the model's maximum context length exactly, every call</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Correct, and it's the same instinct scaled up. Lesson 03 was one tool result; this is the whole window &mdash; the prompt, the tools, the history. The rule doesn't change: fewer, better tokens beat more tokens."
+    data-when-wrong="The instinct to over-include feels safe and isn't &mdash; you'll see why in a moment. The rule that scaled up from Lesson 03's tool results to the whole window is the opposite: find the smallest set of high-signal tokens that gets the outcome you want.">
+  </div>
+</div>
+
+<h2>One window, two different failures</h2>
+
+<p>You already know the window has a cost &mdash; Lesson 02 put a number on it. What that
+lesson didn't say is that the same growth curve produces a <em>second</em>, unrelated failure,
+and confusing the two will cost you a debugging session later.</p>
+
+<p>Anthropic's context engineering guidance opens with the constraint plainly:
+<a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;context
+must be treated as a finite resource with diminishing marginal returns&rdquo;</a> &mdash; and
+names the mechanism: <a
+href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;LLMs
+are based on the transformer architecture, which enables every token to attend to every other
+token across the entire context. This results in n&sup2; pairwise relationships for n
+tokens.&rdquo;</a> Every token you add doesn't just cost tokens &mdash; it dilutes the model's
+attention over every other token already there.</p>
+
+<table>
+  <thead><tr><th></th><th>What grows</th><th>What it costs you</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Token growth</strong><br>Lesson 02's arithmetic</td>
+      <td>Dollars, latency, per-call size</td>
+      <td>A bigger bill and a slower loop. Measurable from <code>usage.input_tokens</code> alone.</td>
+    </tr>
+    <tr>
+      <td><strong>Context rot</strong><br>new to this lesson</td>
+      <td>Nothing you can see in the bill</td>
+      <td>Recall accuracy. The docs name it directly: <a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;as
+      the number of tokens in the context window increases, the model's ability to accurately
+      recall information from that context decreases.&rdquo;</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>These are not the same failure. A run can be cheap and still wrong &mdash; a short window
+stuffed with low-signal tokens rots fast. A run can be expensive and still right &mdash; a long
+transcript of nothing but high-signal turns holds up. The token count on your invoice tells you
+about the first row. It tells you nothing about the second, which is why "just watch the token
+count" is not a context strategy.</p>
+
+<div class="note why">
+  <span class="label">Working memory, not storage</span>
+  <p>The analogy the docs reach for is deliberate: <a
+  href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;Like
+  humans, who have limited working memory capacity, LLMs have an &lsquo;attention
+  budget&rsquo;.&rdquo;</a> A bigger context window (Claude's is large) raises the ceiling. It
+  does not change the shape of the problem &mdash; a bigger desk still gets buried if you never
+  clear it.</p>
+</div>
+
+<h2>The rule that scales up</h2>
+
+<p>Lesson 03 taught you to write tool results in the model's vocabulary &mdash; names and dates,
+not UUIDs and epoch milliseconds &mdash; because <em>high-signal context</em> is easier to reason
+over and, it turned out, cheaper per character too. Context engineering is that same judgement
+applied to everything in the window, not just what a tool hands back:</p>
+
+<blockquote><p>&ldquo;Good context engineering means finding the smallest possible set of
+high-signal tokens that maximize the likelihood of some desired outcome.&rdquo; &mdash; <a
+href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Effective
+context engineering for AI agents</a></p></blockquote>
+
+<p>Notice what this is <em>not</em>: it is not prompt engineering. The same source draws the
+line precisely &mdash; prompt engineering is about how you phrase a fixed set of instructions;
+<a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;context
+engineering refers to the set of strategies for curating and maintaining the optimal set of
+tokens (information) during LLM inference.&rdquo;</a> Prompt engineering is what you write once.
+Context engineering is what stays, turn after turn, as the run gets longer than you planned for.</p>
+
+<h2>Four ways to keep the window small</h2>
+
+<p>For a short run &mdash; the two- and five-call agents you've built so far &mdash; none of
+this matters; the window never gets big enough to rot. It matters once a run goes long: a
+multi-hour coding session, a research agent chasing sources for twenty minutes, anything with
+more turns than you can eyeball. Four named techniques, each trading something specific for
+window space.</p>
+
+<table>
+  <thead><tr><th>Technique</th><th>What it does</th><th>What it costs</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Compaction</strong></td>
+      <td><a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;taking
+      a conversation nearing the context window limit, summarizing its contents, and
+      reinitiating a new context window with the summary&rdquo;</a></td>
+      <td>Whatever the summary drops. A lossy operation, on purpose &mdash; you are choosing what
+      to forget.</td>
+    </tr>
+    <tr>
+      <td><strong>Structured note-taking</strong><br><span class="tag">agentic memory</span></td>
+      <td>The agent <a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;regularly
+      writes notes persisted to memory outside of the context window&rdquo;</a> &mdash; a
+      scratchpad file, not a summary of the transcript</td>
+      <td>Discipline. The agent has to be prompted to write the note <em>before</em> it needs it,
+      not after.</td>
+    </tr>
+    <tr>
+      <td><strong>Sub-agent architectures</strong></td>
+      <td>&ldquo;Rather than one agent attempting to maintain state across an entire project,
+      <a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">specialized
+      sub-agents can handle focused tasks with clean context windows,&rdquo;</a> reporting back a
+      synthesis, not their scratch work</td>
+      <td>Coordination overhead, and a second window to manage per sub-agent. Anthropic's own
+      research system pairs this with <a
+      href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;deterministic
+      safeguards like retry logic and regular checkpoints&rdquo;</a> because a lead agent
+      juggling several sub-agents is a new failure surface, not a free lunch.</td>
+    </tr>
+    <tr>
+      <td><strong>Just-in-time retrieval</strong></td>
+      <td>Keep <a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;lightweight
+      identifiers&rdquo;</a> in context and fetch the full record only when a tool call actually
+      needs it, instead of pre-loading everything up front</td>
+      <td>Latency &mdash; <a
+      href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">&ldquo;runtime
+      exploration is slower than retrieving pre-computed data.&rdquo;</a> You're trading window
+      space for round trips.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">These aren't a menu you pick one from</span>
+  <p>A long-running coding agent plausibly uses all four: notes for decisions made hours ago,
+  compaction when a session nears its limit, sub-agents for isolated investigations, and
+  just-in-time retrieval so the whole codebase is never in context at once. The skill is not
+  memorising the list &mdash; it's recognising, for a given symptom, which one actually answers
+  it.</p>
+</div>
+
+<h2>Match the technique to the symptom</h2>
+
+<p>Four scenarios, four techniques, one correct match each. Commit before you click.</p>
+
+<div class="triage" data-triage>
+  <div class="triage-stage" data-stage></div>
+  <div class="triage-bar">
+    <span data-score></span>
+    <button data-next>Next &rarr;</button>
+  </div>
+  <script type="application/json" data-cases>
+  {
+    "options": [
+      { "id": "compact",  "label": "Compaction" },
+      { "id": "notes",    "label": "Structured note-taking" },
+      { "id": "subagent", "label": "Sub-agent, clean window" },
+      { "id": "jit",      "label": "Just-in-time retrieval" }
+    ],
+    "cases": [
+      {
+        "prompt": "A single 40-turn agent run doing a multi-file refactor is nearing its context window limit, and the refactor isn't finished.",
+        "answer": "compact",
+        "why": {
+          "compact": "This is the textbook trigger &mdash; a conversation approaching its limit, summarized and reinitiated so the run can keep going instead of hitting a hard wall mid-task.",
+          "notes": "Notes are for surviving a reset you already know is coming, written proactively as you go. This run didn't plan for a reset; it's hitting the wall now and needs to recover in place.",
+          "subagent": "Spinning up a sub-agent doesn't help a single continuous run that's already 40 turns deep in one train of thought &mdash; there's no separable sub-task to isolate here.",
+          "jit": "The problem isn't that too much was pre-loaded; it's that 40 turns of real conversation accumulated. Fetching less up front doesn't shrink a transcript you've already generated."
+        }
+      },
+      {
+        "prompt": "A research agent needs to investigate three unrelated companies for one report. Each investigation generates pages of search results the final report will never quote.",
+        "answer": "subagent",
+        "why": {
+          "subagent": "Exactly the isolation this buys: each company's messy search process stays in its own sub-agent's window, and the lead agent only ever sees the synthesized finding &mdash; a clean separation of concerns, not three companies' scratch work stacked in one transcript.",
+          "compact": "Compaction would summarize the mess after the fact, in the same window it was generated in. Here you want the mess never to enter the shared window at all.",
+          "notes": "Notes persist facts across a reset; they don't stop unrelated search noise from three investigations piling into one transcript in the first place.",
+          "jit": "The three companies aren't a lookup-by-reference problem &mdash; each needs a genuine multi-step investigation. Isolating that work is the issue, not deferring when it's fetched."
+        }
+      },
+      {
+        "prompt": "A coding agent works through a backlog over several sessions spanning hours. It needs to remember a decision made three hours (and one context reset) ago.",
+        "answer": "notes",
+        "why": {
+          "notes": "This is the case the technique exists for: a note written outside the context window survives a reset that would otherwise erase the decision, at the cost of the discipline to write it down before it's needed.",
+          "compact": "Compaction happens inside one window's lifetime and still loses detail. Surviving an actual reset, hours later, needs state that lives somewhere the window's reset can't touch.",
+          "subagent": "A sub-agent's window is clean but also temporary &mdash; it doesn't solve remembering something across sessions any more than the lead agent's own window does.",
+          "jit": "Just-in-time retrieval fetches records by a known reference. A decision made in conversation three hours ago isn't sitting in a database with an ID to fetch &mdash; it has to have been written down as a note to exist at all."
+        }
+      },
+      {
+        "prompt": "An agent answers questions against a 50,000-row customer database, but any single question only ever needs two or three specific records.",
+        "answer": "jit",
+        "why": {
+          "jit": "The textbook case: keep lightweight identifiers in context and let a tool fetch the handful of records a question actually needs, instead of a window that can never fit 50,000 rows anyway.",
+          "compact": "There's no growing transcript to summarize here yet &mdash; the problem is what gets loaded up front, before the conversation has even started.",
+          "notes": "Nothing here needs to survive a reset; the records already live durably in the database. The problem is what enters the window, not what leaves it.",
+          "subagent": "Overkill for a lookup. Sub-agents isolate a messy multi-step process; fetching two or three known records by reference is not that."
+        }
+      }
+    ]
+  }
+  </script>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: the two different failures one growing window produces, and which of the
+four techniques answers a reset you can see coming versus a lookup you want to defer.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="Two failures a growing window produces:&#10;1.&#10;2.&#10;&#10;Which technique answers 'I know a reset is coming'?&#10;Which technique answers 'I don't want to load this until I need it'?"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>Token growth (cost, latency &mdash; you can read it off the bill) and context rot (recall
+    accuracy &mdash; you can't). <strong>Structured note-taking</strong> is for a reset you can
+    see coming, written proactively. <strong>Just-in-time retrieval</strong> is for deferring a
+    load until a tool call actually needs it. Compaction is the reactive version of the first;
+    sub-agents isolate work rather than deferring or persisting it.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 15 minutes</span>
+  <p>Everything is in <code>practice/05-context-window/</code>. Run with
+  <code>uv run python practice/05-context-window/growing_context.py</code>. It runs your
+  Lesson 03 tool as <strong>one five-turn conversation</strong> &mdash; nothing is reset between
+  turns, so turn 5 carries turns 1 through 4 with it.</p>
+  <ol>
+    <li><strong>Watch it grow.</strong> Record each turn's <code>input tokens (this turn)</code>
+    and the running <code>cumulative</code> total in <code>NOTES.md</code>. Is turn 5 roughly
+    5&times; turn 1, or faster than that?</li>
+    <li><strong>Make <code>compact()</code> real.</strong> It's currently the identity function.
+    Have it call the model once, no tools, asking it to summarize the conversation so far into
+    what a support agent handing this off would need &mdash; then return a new messages list
+    containing just that summary. Wire it in behind a condition you choose.</li>
+    <li><strong>Re-run and compare</strong> the cumulative total at turn 5, before and after.</li>
+    <li><strong>Break it on purpose.</strong> If compaction fires before turn 4, does the "most
+    urgent ticket" answer still correctly consider all three customers, or did the summary drop
+    one of them?</li>
+    <li><strong>One line, out loud.</strong> Name the specific fact a tighter summary could
+    plausibly have dropped, and say whether losing it would have mattered here.</li>
+  </ol>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> <a
+  href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Effective
+  Context Engineering for AI Agents</a> (Anthropic) &mdash; read it in full; this lesson covered
+  perhaps a third of it. The sections on system prompt structure (&ldquo;right altitude&rdquo;)
+  and tool design overlap with Lessons 03&ndash;04 and are worth a second pass now that you have
+  measured the cost with your own numbers.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0005-context-budget.html">Reference: Context Budget Techniques</a>
+    <a href="../reference/0004-error-message-patterns.html">Reference: Error Message Patterns</a>
+    <a href="../reference/0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="0004-when-the-tool-fails.html">Lesson 04: When the Tool Fails</a>
+    <a href="0003-tool-surface-design.html">Lesson 03: Tool Surface Design</a>
+    <a href="0002-workflow-or-agent.html">Lesson 02: Workflow or Agent?</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Memory &mdash; within-session state (what you just built) versus
+  cross-session state that survives the process exiting entirely.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring the trigger condition you picked for
+    compaction and why. Also worth pushing on: &ldquo;how would I actually measure context rot,
+    not just token count, in a real agent?&rdquo;, and &ldquo;if sub-agents each get a clean
+    window, doesn't that just move the cost to coordination instead of removing it?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/triage.js"></script>
+</body>
+</html>
