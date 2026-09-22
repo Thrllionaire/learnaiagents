@@ -99,6 +99,16 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 A `200` means it's live.
 
+### If the build shows `"status":"errored"` with no useful message
+
+This happens occasionally and is usually transient (e.g. pushing twice in quick
+succession). Trigger a manual rebuild and poll it:
+
+```bash
+gh api -X POST repos/Thrllionaire/learnaiagents/pages/builds
+sleep 15 && gh api repos/Thrllionaire/learnaiagents/pages/builds/latest
+```
+
 ## One-time setup (already done, for reference)
 
 - `git init`, `gh repo create learnaiagents --public --source=. --remote=origin --push`
