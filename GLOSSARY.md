@@ -214,3 +214,26 @@ An Anthropic-provided tool (the memory tool, the bash tool, the text editor tool
 behavior your harness implements, as opposed to a server-side tool the API executes for you.
 The model only ever emits a request; nothing happens until your code runs it.
 _Avoid_: Built-in tool (ambiguous about which side executes it)
+
+**Defense in depth (four-layer model)**:
+Safety as a property of four independent layers — the model, the harness, the tools exposed,
+and the environment a process runs in — none of which is sufficient on its own. Named
+directly in Anthropic's guidance: "no single line of defense is enough to guarantee
+protection."
+_Avoid_: "Security" or "guardrails" used generically without naming which layer is doing the
+work
+
+**Permission gate**:
+A [harness]-level check run against every `tool_use` block before execution, deciding
+allow/ask/deny from the actual command and its actual arguments — never from the model's
+stated intent, and never satisfied by asking the model itself whether an action is safe.
+_Avoid_: Guardrail (too general — this is one specific mechanism), content filter (that
+operates on model output, not on whether a tool call is permitted to run)
+
+**Prompt injection (via tool results)**:
+A malicious instruction embedded in the content of a `tool_result` — a poisoned file, a
+scraped page, another tool's output — that arrives dressed as ordinary data rather than as a
+request from a person, and so isn't guaranteed to trip the same refusal a blunt, typed-out
+request would.
+_Avoid_: Jailbreak (targets the model's own refusal training directly; this targets whatever
+reads the tool_result next, regardless of the model's scruples)

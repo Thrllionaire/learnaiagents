@@ -37,6 +37,20 @@ parametric memory. Communities are where wisdom gets tested.
   requirements, and the multisession pattern for projects spanning sessions. Use for: cross-session
   state — the mechanism behind Lesson 05's "structured note-taking."
 
+### Primary — guardrails & safety
+- [Anthropic: Trustworthy agents in practice](https://www.anthropic.com/research/trustworthy-agents)
+  The four-layer defense model (model, harness, tools, environment), why no single layer is
+  sufficient, prompt-injection defense in depth, and human confirmation via Plan Mode. Use for:
+  the overall mental model for any guardrail design question.
+- [Anthropic Engineering: How we built Claude Code auto mode](https://www.anthropic.com/engineering/claude-code-auto-mode)
+  A real production permission system: allowlist vs. sandbox, the prompt-injection probe on
+  tool outputs, and a transcript classifier that has the model's own reasoning stripped out
+  before it evaluates a pending action. Use for: what a harness-level gate looks like past a
+  toy example.
+- [Claude Code Docs: Configure permissions](https://code.claude.com/docs/en/permissions)
+  The allow/ask/deny tiers by tool type, and where sandbox isolation sits relative to the
+  permission system. Use for: the vocabulary a permission gate's policy reuses.
+
 ### Primary — evaluation
 - [Hamel Husain: Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
   Error analysis first, then tests. The three-level framework, and the rule that an LLM judge is
@@ -72,7 +86,5 @@ parametric memory. Communities are where wisdom gets tested.
 
 ## Gaps
 
-- No strong primary source yet on **agent guardrails / safety patterns** specifically (input validation,
-  permission models, sandboxing, prompt injection defence). Needs a dedicated search.
 - No strong primary source yet on **agent observability / tracing in production**.
 - Need a reference implementation to read end-to-end — a real open-source agent worth studying.

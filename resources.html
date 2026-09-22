@@ -65,6 +65,36 @@ rather than writing better messages about them.</li>
 href="https://github.com/anthropics/anthropic-sdk-python">anthropic-sdk-python
 on GitHub</a> Source of truth for SDK surface — the tool runner,
 streaming, types. Use for: when docs and memory disagree.</li>
+<li><a
+href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Claude
+Platform Docs: Memory tool</a> The client-side memory tool:
+<code>/memories</code> files, the six commands (view, create,
+str_replace, insert, delete, rename) with exact success/error strings,
+path-traversal security requirements, and the multisession pattern for
+projects spanning sessions. Use for: cross-session state — the mechanism
+behind Lesson 05’s “structured note-taking.”</li>
+</ul>
+<h3 id="primary-guardrails-safety">Primary — guardrails &amp;
+safety</h3>
+<ul>
+<li><a
+href="https://www.anthropic.com/research/trustworthy-agents">Anthropic:
+Trustworthy agents in practice</a> The four-layer defense model (model,
+harness, tools, environment), why no single layer is sufficient,
+prompt-injection defense in depth, and human confirmation via Plan Mode.
+Use for: the overall mental model for any guardrail design
+question.</li>
+<li><a
+href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic
+Engineering: How we built Claude Code auto mode</a> A real production
+permission system: allowlist vs. sandbox, the prompt-injection probe on
+tool outputs, and a transcript classifier that has the model’s own
+reasoning stripped out before it evaluates a pending action. Use for:
+what a harness-level gate looks like past a toy example.</li>
+<li><a href="https://code.claude.com/docs/en/permissions">Claude Code
+Docs: Configure permissions</a> The allow/ask/deny tiers by tool type,
+and where sandbox isolation sits relative to the permission system. Use
+for: the vocabulary a permission gate’s policy reuses.</li>
 </ul>
 <h3 id="primary-evaluation">Primary — evaluation</h3>
 <ul>
@@ -73,6 +103,14 @@ Product Needs Evals</a> Error analysis first, then tests. The
 three-level framework, and the rule that an LLM judge is worthless until
 you have measured its agreement with a human. Use for: everything
 eval-related.</li>
+<li><a href="https://research.trychroma.com/context-rot">Chroma: Context
+Rot</a> The study behind the “context rot” claim in the context
+engineering post — 18 LLMs, ~194k calls, needle-in-a-haystack variants
+(needle-question similarity, distractor count, haystack structure) plus
+a repeated-words task, scored by a calibrated LLM judge or Levenshtein
+distance. Use for: how to actually <em>measure</em> recall degradation
+as context grows, not just token count — the methodology to scale down
+for your own agent’s eval set.</li>
 </ul>
 <h3 id="secondary-perspective">Secondary — perspective</h3>
 <ul>
@@ -109,9 +147,6 @@ signal.</p>
 </blockquote>
 <h2 id="gaps">Gaps</h2>
 <ul>
-<li>No strong primary source yet on <strong>agent guardrails / safety
-patterns</strong> specifically (input validation, permission models,
-sandboxing, prompt injection defence). Needs a dedicated search.</li>
 <li>No strong primary source yet on <strong>agent observability /
 tracing in production</strong>.</li>
 <li>Need a reference implementation to read end-to-end — a real

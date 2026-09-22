@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardrails Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Guardrails Reference</h1>
+  <p class="standfirst">The four-layer model, the allow/ask/deny vocabulary, and the design
+  rules for a harness-level permission gate. Keep it next to the tool surface card &mdash;
+  this is what decides whether a well-designed tool actually gets to run.</p>
+  <p class="meta">
+    <span>Reference 07</span><span class="sep">&middot;</span>
+    <span>Guardrails &amp; permission gating</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-22</span>
+  </p>
+</header>
+
+<h2>The four layers</h2>
+
+<p>From <a href="https://www.anthropic.com/research/trustworthy-agents">Trustworthy agents
+in practice</a>: safety is not a property of the model alone. Four independent layers, each
+responsible for something the others can't guarantee:</p>
+
+<table>
+  <thead><tr><th>Layer</th><th>Responsible for</th><th>Fails when&hellip;</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Model</strong></td>
+      <td>Training-shaped judgment &mdash; declining an obviously hostile request</td>
+      <td>The request doesn't look hostile because it arrived as ordinary tool
+      output, not as a direct ask</td>
+    </tr>
+    <tr>
+      <td><strong>Harness</strong></td>
+      <td>Code that runs regardless of what the model wants &mdash; gating, resolving
+      paths, logging</td>
+      <td>A dangerous call has a second path to execution that skips the gate</td>
+    </tr>
+    <tr>
+      <td><strong>Tools</strong></td>
+      <td>Which capabilities exist at all &mdash; the narrower the surface, the less
+      damage a mistake anywhere else can do</td>
+      <td>A tool exposes more than the task needs (a broad <code>delete</code> when
+      only "delete one named file" was required)</td>
+    </tr>
+    <tr>
+      <td><strong>Environment</strong></td>
+      <td>What's physically reachable from where the process runs</td>
+      <td>The process has filesystem or network access wider than any tool
+      was designed to use</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">The rule that generalizes</span>
+  <p>&ldquo;The model generally refuses unsafe requests&rdquo; is a fact about the model
+  layer. It is never a substitute for a harness-layer check, because the case that gets
+  tested (a blunt, typed-out request) is not the case that gets attacked (an instruction
+  smuggled inside a <code>tool_result</code>).</p>
+</div>
+
+<h2>Permission gate design</h2>
+
+<table>
+  <thead><tr><th>Tier</th><th>Meaning</th><th>Decided by</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>allow</code></td>
+      <td>Runs immediately</td>
+      <td>Policy, keyed on command <em>and</em> its actual arguments &mdash; never
+      command name alone</td>
+    </tr>
+    <tr>
+      <td><code>ask</code></td>
+      <td>Requires an explicit human approval before running</td>
+      <td>A real prompt shown to a person, not a second model call</td>
+    </tr>
+    <tr>
+      <td><code>deny</code></td>
+      <td>Never runs</td>
+      <td>Policy &mdash; and the default for any command not explicitly listed</td>
+    </tr>
+  </tbody>
+</table>
+
+<ul>
+  <li><strong>Judge the action, not the justification.</strong> Claude Code's auto-mode
+  classifier strips the model's own reasoning before evaluating a pending action: <a
+  href="https://www.anthropic.com/engineering/claude-code-auto-mode">&ldquo;We strip
+  assistant text so the agent can't talk the classifier into making a bad call.&rdquo;</a>
+  A gate that reads the model's stated intent is gradable by whatever talked the model
+  into the bad call in the first place.</li>
+  <li><strong>The check must be the only path to execution.</strong> If the underlying
+  handler (<code>memory.execute</code>, a database client, a shell call) is reachable from
+  anywhere else in the codebase without going through the gate, the gate is a speed bump,
+  not a boundary.</li>
+  <li><strong>A second model call is still the model layer.</strong> Asking Claude &ldquo;is
+  this safe?&rdquo; and trusting the answer is not a harness decision &mdash; it's the same
+  layer as the thing it's meant to check, run twice.</li>
+  <li><strong>An allowlist is not a sandbox.</strong> A whitelist says which tools may be
+  invoked; it says nothing about what those tools can reach once invoked. Claude Code's own
+  <a href="https://code.claude.com/docs/en/permissions">permission docs</a> pair its
+  allow/ask/deny tiers with separate sandbox isolation (bubblewrap on Linux, Seatbelt on
+  macOS) for exactly this reason &mdash; two different questions, two different
+  mechanisms.</li>
+  <li><strong>Treat every <code>tool_result</code> as untrusted input.</strong> Per the <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Claude
+  docs</a>, content coming back through a tool result can carry an injected instruction and
+  should be handled with the same suspicion as any other external input &mdash; regardless
+  of how the model reacts to it in a given run.</li>
+</ul>
+
+<h2>Testing a gate: transcript, not verdict</h2>
+
+<p>&ldquo;I asked it to do the bad thing and it didn't&rdquo; has two different causes, and
+only one of them is your code: the model declined on its own (nothing exercised), or the
+model attempted it and the gate stopped it (the thing under test actually ran). Confirm
+which one happened from the transcript &mdash; what the model actually called, in order
+&mdash; not from the final answer alone. When in doubt, force the harness-only path: call
+the handler directly, bypassing the model, the way <a
+href="../lessons/0006-memory.html">Lesson 06</a>'s traversal test did.</p>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://www.anthropic.com/research/trustworthy-agents">Anthropic: Trustworthy
+    agents in practice</a> &mdash; the four-layer model, defense-in-depth against prompt
+    injection, human confirmation via Plan Mode</li>
+    <li><a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic
+    Engineering: How we built Claude Code auto mode</a> &mdash; a real production gate: the
+    allowlist/sandbox split, the prompt-injection probe on tool outputs, the
+    reasoning-stripped classifier</li>
+    <li><a href="https://code.claude.com/docs/en/permissions">Claude Code Docs: Configure
+    permissions</a> &mdash; the allow/ask/deny tiers by tool type, and where sandboxing sits
+    relative to them</li>
+    <li><a
+    href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Claude
+    Platform Docs: Handle tool calls</a> &mdash; the prompt-injection warning about
+    tool_result content specifically</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0007-guardrails.html">Lesson 07: Guardrails</a>
+    <a href="0006-memory-reference.html">Reference: Memory Tool</a>
+    <a href="0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

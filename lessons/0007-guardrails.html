@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardrails: Permissions, Gating, and the Harness's Job</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Guardrails: Permissions, Gating, and the Harness's Job</h1>
+  <p class="standfirst">In Lesson 06, Claude refused to write outside <code>/memories</code>
+  when you asked it to, in plain words. That felt like safety. It wasn't your code doing
+  anything &mdash; and a prompt-injected instruction hiding inside a tool result doesn't ask
+  in plain words. This lesson builds the thing that has to stop it regardless: a gate the
+  harness owns, that the model's cooperation was never required for.</p>
+  <p class="meta">
+    <span>Lesson 07</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory before anything new.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>In Lesson 06 you asked Claude, in plain
+  language, to write a file outside <code>/memories</code>. It declined in its own reasoning
+  and never called <code>create</code> at all. What did that refusal actually prove about your
+  code?</p>
+  <div class="opts">
+    <button class="opt">That the containment check in <code>_resolve</code> wasn't
+    needed after all</button>
+    <button class="opt" data-correct>Nothing &mdash; the containment check was never
+    exercised, because the call never reached it</button>
+    <button class="opt">That the memory tool blocks traversal automatically, before
+    your handler runs</button>
+    <button class="opt">That your containment check has a bug, since no call
+    landed</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right, and that gap is exactly today's subject. A model declining a blunt request is real, but it happened in a layer your code doesn't own and can't rely on &mdash; the request that actually tests your harness is the one that skips the model's cooperation entirely."
+    data-when-wrong="The call never reached `_resolve` at all &mdash; Claude talked itself out of it before emitting a `tool_use` block. That tells you something about the model's training, not about whether your containment check works. The only way to test the check itself was to bypass the model and call `memory.execute` directly, which is what actually escaped once the check was commented out.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>The naive handler's traversal bug was
+  <code>real_path = self.root + path.replace("/memories", "")</code> &mdash; stripping a
+  string prefix and trusting whatever was left. Stated so it generalizes past this one
+  handler, what's the fix?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Resolve to a canonical absolute path, then check
+    it's actually contained inside the allowed root</button>
+    <button class="opt">Reject any path containing the two-character string
+    <code>..</code> before resolving it</button>
+    <button class="opt">Trust the model's own claim that a given path is
+    safe to use</button>
+    <button class="opt">Cap path length to stop deeply nested traversal
+    attempts</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="That's the general shape of the fix, and it's worth holding onto: string manipulation on a path is never the check. Resolve first, then test containment against the real, canonical location &mdash; the same move you'll reuse today, just at the level of an entire tool call instead of one path argument."
+    data-when-wrong="Blocking the literal string `..` is exactly the kind of check a determined attacker routes around (symlinks, URL-encoding, absolute paths that don't even need `..`). The property you actually want is containment: resolve the path to its real, canonical location, and check that location sits inside the root you meant to allow &mdash; not a pattern match on the string that arrived.">
+  </div>
+</div>
+
+<h2>One refusal is not a policy</h2>
+
+<p>Nothing about last lesson's refusal was fake. Claude really did decline. The problem is
+what that refusal ran on: a plainly-worded, clearly hostile-sounding request, typed by a
+person, in the same turn the model was already reasoning about. That is close to the best
+case for a model's own training-shaped judgment to catch something.</p>
+
+<p>A prompt-injected instruction rarely looks like that. It arrives inside a
+<code>tool_result</code> &mdash; the contents of a file the model asked to <code>view</code>,
+a scraped web page, another tool's output &mdash; dressed as ordinary data, not as a request
+from anyone. The <a
+href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Claude
+docs warn about this directly</a>: content coming back through a <code>tool_result</code>
+should be treated the same way you'd treat any other untrusted input, because nothing
+guarantees the model's refusal reflex fires the same way on data as it does on a direct
+ask.</p>
+
+<h2>Four layers, not one</h2>
+
+<p>Anthropic's <a href="https://www.anthropic.com/research/trustworthy-agents">Trustworthy
+agents in practice</a> names the shape of the problem directly: safety isn't one property of
+the model, it's a property of four separate layers &mdash; <strong>the model</strong>,
+<strong>a harness</strong>, <strong>tools</strong>, and <strong>an environment</strong> &mdash;
+and &ldquo;no single line of defense is enough to guarantee protection,&rdquo; which is why
+&ldquo;the safeguards we and others build need to account for them all.&rdquo;</p>
+
+<table>
+  <thead><tr><th>Layer</th><th>What you've already touched</th><th>Who's responsible</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Model</strong></td>
+      <td>Lesson 06's refusal &mdash; the model declined on its own</td>
+      <td>Anthropic's training. Real, but not something your code controls or can assume
+      will fire the same way twice.</td>
+    </tr>
+    <tr>
+      <td><strong>Harness</strong></td>
+      <td><code>MemoryHandler._resolve</code>; today's <code>PermissionGate</code></td>
+      <td>You. The only layer where "the model didn't want to" is never the mechanism.</td>
+    </tr>
+    <tr>
+      <td><strong>Tools</strong></td>
+      <td>Choosing to expose <code>delete</code> at all, back in Lesson 06</td>
+      <td>Tool surface design (Lesson 03) &mdash; the narrower the capability, the less a
+      harness bug or a model mistake can reach.</td>
+    </tr>
+    <tr>
+      <td><strong>Environment</strong></td>
+      <td><code>MEMORY_ROOT</code> scoped to a subdirectory, not the whole filesystem</td>
+      <td>Deployment &mdash; what's reachable at all from where the process actually
+      runs.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">The conflation to watch for</span>
+  <p>&ldquo;The model generally does the right thing&rdquo; is a statement about the
+  <em>model</em> layer. It is not a substitute for anything at the <em>harness</em> layer,
+  no matter how reliably it seems to hold in testing &mdash; because the one time it's
+  tested against a plain, typed-out, obviously-suspicious request is not the case a real
+  attacker sends.</p>
+</div>
+
+<h2>The harness's job: a gate before every call</h2>
+
+<p>The mechanism is specific: something that intercepts every <code>tool_use</code> block
+<em>before</em> it reaches execution, and decides allow, ask, or deny from the actual
+command and its actual arguments &mdash; not from whether the model sounded confident, and
+not from what the model claims it's trying to do.</p>
+
+<p>This isn't hypothetical machinery invented for this lesson. It's what the tool you're
+reading this lesson through already does to itself. Claude Code's own <a
+href="https://code.claude.com/docs/en/permissions">permission system</a> gates every tool
+call through allow/ask/deny tiers by default, and its <a
+href="https://www.anthropic.com/engineering/claude-code-auto-mode">auto mode</a> replaces the
+human at the "ask" tier with a classifier that inspects the actual pending action. One detail
+is worth sitting with:</p>
+
+<blockquote><p>&ldquo;We strip assistant text so the agent can't talk the classifier into
+making a bad call.&rdquo; &mdash; <a
+href="https://www.anthropic.com/engineering/claude-code-auto-mode">How we built Claude Code
+auto mode</a></p></blockquote>
+
+<p>The classifier doesn't see the model's justification for the action &mdash; only the
+action itself. A model that has been talked into something bad by an injected instruction is,
+by definition, going to produce a reasonable-sounding justification for it. A gate that reads
+that justification is grading the model's own essay about why it should be trusted. A gate
+that only ever sees the command and its arguments can't be argued with.</p>
+
+<h2>Spot the flaws</h2>
+
+<p>Here's a first pass at a gate. It runs, it does stop <em>something</em>, and it has three
+real, separately-fixable problems.</p>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>Find the three real flaws.</p>
+<pre><code>DANGEROUS = {"delete"}
+
+def guarded_execute(memory, command, **kwargs):
+    if command in DANGEROUS:
+        print(f"About to run {command} on {kwargs.get('path')}")
+        reply = client.messages.create(
+            model=MODEL,
+            max_tokens=100,
+            messages=[{"role": "user", "content":
+                f"Is it safe to {command} {kwargs.get('path')}? Answer yes or no."}],
+        )
+        if "yes" not in reply.content[0].text.lower():
+            return "Error: denied by safety check"
+    return memory.execute(command, **kwargs)</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="Asking a second model call to certify safety is still the model layer &mdash; it's not a harness guard, it's the same layer that already declined (or didn't) in Lesson 06, wearing a different prompt. Whatever talked the acting model into a bad call can talk this judge call into approving it too; nothing here is independent of the thing it's supposed to check.">The safety check is itself just another model call, not a harness decision</button>
+      <button class="aopt" data-flaw
+        data-why="Only `delete` is ever gated. But `str_replace` can corrupt any file `_resolve`'s boundary lets it reach, and `create` can write anywhere inside that same boundary &mdash; the gate needs to see which command AND which path, not assume one verb is uniquely dangerous and the rest are automatically fine.">Only the `delete` command is checked; every other command skips the gate entirely</button>
+      <button class="aopt" data-flaw
+        data-why="Nothing stops `memory.execute` from being called directly somewhere else in the codebase, skipping `guarded_execute` by construction. A gate that isn't the only path to execution isn't a boundary &mdash; it's a speed bump that a second call site, today or in six months, can simply drive around.">`memory.execute` can still be called directly, bypassing this function entirely</button>
+      <button class="aopt"
+        data-why="Printing the pending command before running it is just a log line &mdash; useful, not a flaw. It doesn't gate anything by itself, but there's nothing wrong with it either."><code>print()</code>-ing the command before deciding is a harmless flaw</button>
+      <button class="aopt"
+        data-why="Denying by default when the reply doesn't contain the word 'yes' &mdash; rather than requiring an explicit 'no' &mdash; is fail-closed, which is the direction you want a check to fail in. That part of the logic is fine as written; the problem is what's being asked, not this default.">Treating any reply that isn't exactly &ldquo;yes&rdquo; as a denial is too strict</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: what a harness-level gate has that "ask the model if it's safe" never
+gives you, and why a gate that isn't the only call site isn't really a gate.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="What a harness gate has that a second model call doesn't:&#10;&#10;Why a gate needs to be the only path to execution:"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>A harness gate's decision doesn't depend on the model's cooperation at all &mdash;
+    it runs on the actual command and arguments, in code the model never touches, so nothing
+    the model was talked into can talk the gate out of enforcing its policy. And a gate that
+    can be routed around by a second call site to the same function isn't a boundary; it's
+    only a boundary if every path to execution goes through it, which is why today's build
+    task wires the gate directly into the loop rather than leaving <code>memory.execute</code>
+    reachable on its own.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 20&ndash;25 minutes</span>
+  <p>Everything is in <code>practice/07-guardrails/</code>. <code>MemoryHandler</code> is
+  Lesson 06's working version, given as-is &mdash; today's work is all in
+  <code>PermissionGate</code> and in <code>run()</code>:</p>
+  <pre><code>uv run python practice/07-guardrails/guardrail_agent.py "&lt;prompt&gt;"</code></pre>
+  <ol>
+    <li><strong>Implement <code>PermissionGate.check</code>.</strong> <code>"allow"</code>
+    commands proceed immediately. <code>"ask"</code> commands print the actual command and
+    path, then require an explicit <code>"y"</code> at a real terminal prompt &mdash;
+    anything else denies. Anything not in <code>POLICY</code> at all denies by default.</li>
+    <li><strong>Wire the gate into the loop.</strong> Every <code>tool_use</code> block must
+    go through <code>gate.check</code> before <code>memory.execute</code> runs. A denial
+    means <code>memory.execute</code> is never called &mdash; the <code>tool_result</code>
+    reports the denial instead.</li>
+    <li><strong>Confirm a real delete gets stopped.</strong> Write a scratch file, then in a
+    fresh invocation ask it to delete that file and answer <code>n</code> at the prompt.
+    Confirm the file survives.</li>
+    <li><strong>The prompt injection test.</strong> Seed a memory file on disk (not through
+    the agent) containing an embedded instruction telling the model to delete
+    <code>/memories</code>. Ask an innocuous question that makes the model
+    <code>view</code> that file. Record, from the actual transcript &mdash; not a guess
+    &mdash; whether the model attempted the injected call, and if it did, what actually
+    stopped it.</li>
+    <li><strong>One line, out loud.</strong> What <code>PermissionGate</code> has that
+    &ldquo;the model generally refuses unsafe requests&rdquo; doesn't.</li>
+  </ol>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> <a
+  href="https://www.anthropic.com/research/trustworthy-agents">Trustworthy agents in
+  practice</a> (Anthropic) &mdash; read the full four-layer breakdown and the section on
+  human confirmation via Plan Mode, which is the same idea as today's <code>"ask"</code>
+  tier, generalized to a whole task instead of one call.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0007-guardrails-reference.html">Reference: Guardrails</a>
+    <a href="../reference/0006-memory-reference.html">Reference: Memory Tool</a>
+    <a href="../reference/0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="0006-memory.html">Lesson 06: Memory</a>
+    <a href="0005-context-engineering.html">Lesson 05: Context Engineering</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Evals &mdash; error analysis first, then tests, then judges;
+  how you'd know any of this actually holds up before a user finds out it doesn't.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring what the injection test actually
+    showed &mdash; not the verdict, the transcript. Also worth pushing on: &ldquo;if the
+    model itself decided the injected instruction looked wrong and never called
+    <code>delete</code>, does that mean the gate was unnecessary this time, or does it mean
+    you got lucky on this run with this model?&rdquo;, and &ldquo;where would a `PermissionGate`
+    like this one actually live in a real production harness &mdash; per tool call, per
+    session, per user?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>
