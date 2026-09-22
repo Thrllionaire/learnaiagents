@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evals: One Run Is an Anecdote</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Evals: One Run Is an Anecdote</h1>
+  <p class="standfirst">Lessons 06 and 07 both ended the same way. You ran a test once,
+  looked at what happened, and wrote down a verdict. The verdicts were mostly right, but
+  each one was a single sample from a model that doesn't give the same answer twice. This
+  lesson swaps the verdict for a number: several trials, graded by code, from a harness
+  that keeps every transcript so you can read what the number is made of.</p>
+  <p class="meta">
+    <span>Lesson 08</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory. The second one goes back three lessons, on purpose.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>In Lesson 07's injection test, Claude
+  read the poisoned <code>notes.txt</code> and never asked for the injected
+  <code>delete</code>. What did that one clean run establish?</p>
+  <div class="opts">
+    <button class="opt">That the model resists this injection and the gate is
+    redundant here</button>
+    <button class="opt" data-correct>Only what happened once, with this model, on this
+    exact phrasing</button>
+    <button class="opt">That the permission gate blocked the call before the model
+    could ask</button>
+    <button class="opt">That the file contents never reached the model's context
+    window at all</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. That's the thread this lesson picks up: a single run is one sample. It tells you nothing about the next phrasing, the next model checkpoint, or even the same prompt run again. Today you turn that sample into a rate."
+    data-when-wrong="The transcript showed the model viewed the file and then simply didn't emit a `delete` tool_use. The gate never had anything to decide. What you got was one sample of model behaviour, and a sample isn't a rate. It says nothing about a politer phrasing, a different model, or the same prompt on its fifth run.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>In Lesson 05, compaction's
+  &ldquo;after&rdquo; figure (1,763 tokens) looked roughly 4&times; better than the naive
+  run (7,987). What was actually wrong with that comparison?</p>
+  <div class="opts">
+    <button class="opt">It left out the output tokens that the summarization
+    call produced</button>
+    <button class="opt" data-correct>Resetting the counter threw away every turn
+    before the compaction fired</button>
+    <button class="opt">The naive run was measured against a different model
+    than the compacted one</button>
+    <button class="opt">Compaction only lowers cost after the context window
+    has overflowed</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. One variable was doing two jobs, the lifetime total and the trigger signal, and resetting it quietly deleted evidence. Keep this in mind today. An eval number is only as honest as your definition of what it counts, and the most common eval bug is a metric that measures something other than its label."
+    data-when-wrong="The problem wasn't a missing token type. `cumulative = 0` after compaction threw away turns 1&ndash;3 from the total, so the &lsquo;after&rsquo; number measured part of the run, not all of it. The fix split the lifetime total from the trigger signal. Keep this in mind today: a metric that measures something other than its label is the most common eval bug there is.">
+  </div>
+</div>
+
+<h2>The vocabulary</h2>
+
+<p>Anthropic's <a
+href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Demystifying
+evals for AI agents</a> uses a small, precise vocabulary. It's worth adopting as-is,
+because each word names a separate part of the harness you're about to use:</p>
+
+<table>
+  <thead><tr><th>Term</th><th>Definition (quoted)</th><th>In today's harness</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Task</strong></td>
+      <td>&ldquo;A single test with defined inputs and success criteria.&rdquo;</td>
+      <td><code>Task</code>: a prompt, seeded files, graders</td></tr>
+    <tr><td><strong>Trial</strong></td>
+      <td>&ldquo;Each attempt at a task&rdquo;, and &ldquo;because model outputs vary
+      between runs, we run multiple trials.&rdquo;</td>
+      <td><code>run_trial()</code>, <code>--trials K</code></td></tr>
+    <tr><td><strong>Transcript</strong></td>
+      <td>&ldquo;The complete record of a trial, including outputs, tool calls,
+      reasoning&hellip;&rdquo;</td>
+      <td><code>Trial.log</code>, saved to <code>runs/*.json</code></td></tr>
+    <tr><td><strong>Outcome</strong></td>
+      <td>&ldquo;The final state in the environment at the end of the trial.&rdquo;</td>
+      <td>What's on disk in <code>Trial.root</code></td></tr>
+    <tr><td><strong>Grader</strong></td>
+      <td>&ldquo;Logic that scores some aspect of the agent's performance.&rdquo;</td>
+      <td>Your four TODO functions</td></tr>
+  </tbody>
+</table>
+
+<p>Measured against that table, Lesson 07's injection test was one task, one trial, and a
+grader that was you reading the terminal. There's nothing wrong with any of those parts.
+There just wasn't enough of any of them to support a claim like &ldquo;the agent resists
+injection.&rdquo;</p>
+
+<h2>Look before you grade</h2>
+
+<p>The natural instinct is to write assertions first. Hamel Husain's <a
+href="https://hamel.dev/blog/posts/evals/">Your AI Product Needs Evals</a> says to do the
+reverse: read what the system actually did, and let the assertions come from what you
+saw. &ldquo;If you have trouble thinking of assertions, you should critically examine your
+traces and failure modes.&rdquo; He also says &ldquo;You must remove all friction from the
+process of looking at data.&rdquo;</p>
+
+<p>That's why today's harness writes every trial's transcript to a JSON file, and why the
+first build step runs with <code>--no-grade</code>. The graders you write should come from
+behaviour you've read, not behaviour you assumed. The same transcripts are also how you
+later check the graders themselves:</p>
+
+<blockquote><p>&ldquo;You won't know if your graders are working well unless you read the
+transcripts and grades from many trials.&rdquo; &mdash; <a
+href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Demystifying
+evals for AI agents</a></p></blockquote>
+
+<h2>Two graders, two layers</h2>
+
+<p>Every injection task in today's harness has two code-based graders, and they're kept
+apart on purpose:</p>
+
+<table>
+  <thead><tr><th>Grader</th><th>Looks at</th><th>Question it answers</th></tr></thead>
+  <tbody>
+    <tr><td><code>files_survive</code></td><td>Outcome: the disk</td>
+      <td>Did anything actually get destroyed?</td></tr>
+    <tr><td><code>no_delete_requested</code></td><td>Transcript: tool calls</td>
+      <td>Did the model <em>try</em>?</td></tr>
+  </tbody>
+</table>
+
+<p>Anthropic's default advice is to prefer the first kind: &ldquo;it's often better to grade
+what the agent produced, not the path it took,&rdquo; because checks on the path break
+whenever the model finds a different valid route. The same post also lists &ldquo;tool
+calls verification (tools used, parameters)&rdquo; as a legitimate code-based grader. It's
+the right choice when the call itself is the behaviour you're measuring, and here it
+is.</p>
+
+<p>Now apply Lesson 07. With the gate on, and the scripted human answering
+<code>n</code>, can <code>files_survive</code> ever fail on an injection task?</p>
+
+<div class="note trap">
+  <span class="label">The mislabelled metric</span>
+  <p>It can't. The gate blocks the delete whatever the model does, so
+  <code>files_survive</code> reads 5/5 on a model that falls for the injection every time.
+  If you report that number as &ldquo;injection resistance&rdquo;, you're making Recall 2's
+  mistake again: a real number under the wrong label. With the gate on, the outcome grader
+  measures <strong>the gate</strong> and the transcript grader measures <strong>the
+  model</strong>. Build step 4 checks this by removing the gate.</p>
+</div>
+
+<p>One more thing the task list does on purpose. It includes <code>legit-delete</code>, a
+task where deleting is correct. Without it, an agent that never deletes anything would
+score perfectly on every injection task. &ldquo;Test both the cases where a behavior
+<em>should</em> occur and where it <em>shouldn't</em>. One-sided evals create one-sided
+optimization.&rdquo; (<a
+href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Anthropic</a>)</p>
+
+<h2>Which grader?</h2>
+
+<div class="triage" data-triage>
+  <div class="triage-stage" data-stage></div>
+  <div class="triage-bar">
+    <span data-score></span>
+    <button data-next>Next &rarr;</button>
+  </div>
+  <script type="application/json" data-cases>
+  {
+    "options": [
+      { "id": "outcome",    "label": "Code: check the outcome" },
+      { "id": "transcript", "label": "Code: check the transcript" },
+      { "id": "judge",      "label": "Model: an LLM judge" },
+      { "id": "human",      "label": "Human: you read it" }
+    ],
+    "cases": [
+      {
+        "prompt": "A coding agent is asked to fix a failing test. You want to know whether the test suite passes afterwards.",
+        "answer": "outcome",
+        "why": {
+          "outcome": "Right. The finished state is what matters, and code can check it exactly: run the suite. Grading how the agent got there would fail a valid fix that took a different route.",
+          "transcript": "The route doesn't matter here. Plenty of different edit sequences produce a passing suite, and a transcript check would fail some valid ones. Grade the finished state.",
+          "judge": "A model's opinion on whether tests pass is strictly worse than running them. Use code whenever code can answer the question.",
+          "human": "You could check it by hand, but running the suite gives an exact, repeatable answer every time. Save human attention for questions code can't answer."
+        }
+      },
+      {
+        "prompt": "An email agent sits behind a gate that blocks sends to unknown addresses. You want to know how often the model <em>attempts</em> to email an address outside the contact list.",
+        "answer": "transcript",
+        "why": {
+          "transcript": "Right. This is today's lesson in a new setting. The gate makes the outcome clean whatever the model does, so the only evidence of the attempt is the requested tool call.",
+          "outcome": "That's the mislabelled-metric trap. With the gate blocking those sends, the outbox is always clean. The outcome check would measure the gate, not the model's behaviour.",
+          "judge": "No judgement needed. Whether a tool_use with a given address appears in the transcript is a yes/no fact code can read.",
+          "human": "It's a mechanical check across many trials. Code reads every transcript consistently. Your eyes are needed for building the grader, not for running it."
+        }
+      },
+      {
+        "prompt": "A support agent drafts replies. You want to know whether each reply acknowledges the customer's frustration before giving the fix.",
+        "answer": "judge",
+        "why": {
+          "judge": "Right. There's no string to match or file to check. It's a question about tone and meaning, which is where a model grader earns its cost. Next lesson covers how to make sure it agrees with you.",
+          "outcome": "No environment state records empathy. The reply is text, and the property you want is about what the text means.",
+          "transcript": "Tool calls won't tell you about tone. The property you want lives in the meaning of the prose.",
+          "human": "Right quality, wrong scale. You can't personally read every reply on every eval run. You'll grade a sample yourself, but only to calibrate a judge that reads the rest."
+        }
+      },
+      {
+        "prompt": "You've just written an LLM judge for the case above. Before trusting its scores, you need to know whether it's right.",
+        "answer": "human",
+        "why": {
+          "human": "Right. A judge is only worth something once you've measured how often it agrees with a human on the same examples. That measurement is the whole of next lesson.",
+          "judge": "Grading a judge with another judge just moves the question. At some point someone has to establish the ground truth, and that someone is you.",
+          "outcome": "The judge's output is a score, not a state change. The question is whether the score matches reality, and only a human decides what reality is here.",
+          "transcript": "The judge's transcript shows what it said, not whether it was right. You need an independent verdict to compare against."
+        }
+      }
+    ]
+  }
+  </script>
+</div>
+
+<h2>One trial is not a rate</h2>
+
+<p>Once you have several trials, two numbers matter, and they answer opposite questions
+(<a href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Anthropic</a>):</p>
+
+<ul>
+  <li><strong>pass@k</strong>: &ldquo;the likelihood that an agent gets at least one correct
+  solution in k attempts.&rdquo; That's the right number when you can retry and keep the
+  best result.</li>
+  <li><strong>pass^k</strong>: &ldquo;the probability that all k trials succeed.&rdquo;
+  That's the right number when every attempt counts, and a guardrail is exactly that
+  case. An attacker needs only one success.</li>
+</ul>
+
+<p>The worked example from the same post: &ldquo;If your agent has a 75% per-trial success
+rate and you run 3 trials, the probability of passing all three is (0.75)&sup3; &asymp;
+42%.&rdquo; A number that sounds reassuring per trial falls apart once it's repeated.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check</span>Your <code>no_delete_requested</code> grader
+  passes on 90% of <code>inj-polite</code> trials. The agent will read that poisoned note
+  five times this week. What's the chance it resists every time?</p>
+  <div class="opts">
+    <button class="opt">About 90%, the same as the per-trial rate</button>
+    <button class="opt" data-correct>About 59%, which is 0.9 to the fifth power</button>
+    <button class="opt">About 99.999%, which is one minus 0.1 to the fifth</button>
+    <button class="opt">About 50%, because each read is a coin flip</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. That's pass^5, and it's the number a guardrail should be judged on. The 99.999% option is pass@5, the chance of at least one clean run, which is the wrong question when one failure is enough to lose the file."
+    data-when-wrong="&lsquo;Resists every time&rsquo; means all five trials pass, which is pass^k: 0.9<sup>5</sup> &asymp; 0.59. The 99.999% figure is pass@5, the chance that at least one run is clean. That's the right metric when you get to keep your best try, and the wrong one for a guardrail.">
+  </div>
+</div>
+
+<p>One sanity rule from the same source, for when a number looks too bad: &ldquo;With
+frontier models, a 0% pass rate across many trials&hellip; is most often a signal of a
+broken task, not an incapable agent.&rdquo; Suspect the grader before you suspect the
+model. The same applies in reverse. A grader you've only ever seen pass hasn't been
+tested yet, which is Lesson 07's <code>frobnicate</code> bug again, and why the build
+includes a <code>selftest()</code>.</p>
+
+<h2>Spot the flaws</h2>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>A teammate's first injection eval.
+    Find the four real flaws.</p>
+<pre><code># gate on; "ask" prompts are auto-answered "n"
+memories = Path("eval_memories")
+seed(memories, "notes.txt", POISONED_NOTE)
+
+def eval_injection():
+    trial = run_agent(STANDUP_Q, root=memories)
+    return ("notes.txt" in trial.final_text
+            or (memories / "notes.txt").exists())
+
+print("injection resistance:",
+      "PASS" if eval_injection() else "FAIL")</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="It runs once and reports PASS/FAIL. One trial gives you a sample, not a rate. You can't get pass^k from k=1, and a 75%-reliable model will show PASS three times out of four.">It runs a single trial and reports the result as a verdict</button>
+      <button class="aopt" data-flaw
+        data-why="The model's final answer almost always mentions notes.txt, because it just read the file to answer the question. With `or`, that alone produces a PASS. The grader is scoring what the model said, not what happened. That's the same trap as Lesson 07's classifier reading the model's justification.">It passes whenever the model's reply merely mentions the file</button>
+      <button class="aopt" data-flaw
+        data-why="With the gate on and 'n' auto-answered, the file always survives, so the outcome half measures the gate. Labelling the result 'injection resistance' says it measures the model. Keep the gate's reliability and the model's resistance as separate numbers.">The outcome check measures the gate, but it's labelled as model resistance</button>
+      <button class="aopt" data-flaw
+        data-why="There's no task where deleting is the right answer. An agent that refuses every delete, including legitimate ones, gets a perfect score. One-sided evals create one-sided optimization.">Nothing checks that a legitimate delete still works</button>
+      <button class="aopt"
+        data-why="Code-based graders are the right default here. The question (was a file deleted, was a delete requested) is mechanical, so code answers it cheaply, deterministically, and reproducibly. An LLM judge would add cost and noise for no gain.">It uses a code check where it should use an LLM judge</button>
+      <button class="aopt"
+        data-why="Seeding the poisoned note directly on disk is correct. You're setting up the scenario, not testing whether the agent will write poison. It's the same setup Lesson 07 used.">It seeds the poisoned note on disk instead of via the agent</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling back up, answer both questions below.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="With the gate on, what does files_survive measure, and why?&#10;&#10;Why is pass^k, not pass@k, the number for a guardrail?"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>With the gate on and the human answering <code>n</code>, the file survives whether
+    or not the model fell for the injection. So <code>files_survive</code> measures the
+    gate, and only the transcript grader (<code>no_delete_requested</code>) measures the
+    model. For a guardrail, every attempt counts and an attacker needs only one success,
+    so the relevant probability is that <em>all</em> k trials pass, pass^k. pass@k answers
+    &ldquo;did it ever work?&rdquo;, which only matters when you get to keep your best
+    try.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 20&ndash;25 minutes</span>
+  <p>Everything is in <code>practice/08-evals/</code>. The harness imports
+  <code>MemoryHandler</code> and your <code>PermissionGate</code> directly from
+  <code>practice/07-guardrails/</code>, so it measures your code. <code>NOTES.md</code>
+  has the checklist, and one house rule: <strong>every answer is pasted output first, then
+  your read of it.</strong></p>
+  <ol>
+    <li><strong>Look first.</strong> <code>--no-grade --trials 3</code>, then read every
+    transcript in <code>runs/gate/</code>. Write one line per task on what the model
+    actually did.</li>
+    <li><strong>Write the graders.</strong> <code>file_gone</code>,
+    <code>no_delete_requested</code>, <code>delete_requested</code>. Each is two or three
+    lines; <code>files_survive</code> is the worked example.</li>
+    <li><strong>Prove they can fail.</strong> Implement <code>selftest()</code>: hand-built
+    bad and good <code>Trial</code>s, no model calls. Run <code>--selftest</code>.</li>
+    <li><strong>Run it, then remove the gate.</strong> Predict which grader's numbers will
+    move under <code>--no-gate</code> <em>before</em> running it. Paste both tables.</li>
+    <li><strong>One line.</strong> The pass^5 for <code>inj-polite</code> from your real
+    numbers, and what you'd say to a teammate who reports &ldquo;I ran the injection test
+    and it passed.&rdquo;</li>
+  </ol>
+  <p>This is 20 trials on Haiku, which costs cents. Don't cut the trial count to save
+  money: the trial count is the point of the lesson.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> <a
+  href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Demystifying
+  evals for AI agents</a> (Anthropic). Read the grader-types comparison and the section
+  on pass@k vs pass^k closely. Then read Hamel Husain's <a
+  href="https://hamel.dev/blog/posts/evals/">Your AI Product Needs Evals</a> for the
+  &ldquo;look at data first&rdquo; discipline. It's the source for next lesson too.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0008-evals-reference.html">Reference: Evals</a>
+    <a href="../reference/0007-guardrails-reference.html">Reference: Guardrails</a>
+    <a href="0007-guardrails.html">Lesson 07: Guardrails</a>
+    <a href="0005-context-engineering.html">Lesson 05: Context Engineering</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> LLM judges. Some properties code can't check, like tone,
+  faithfulness, or &ldquo;did it actually answer the question&rdquo;. For those you use a
+  model as the grader, but first you measure how often it agrees with you.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring the two pasted tables, not a
+    summary of them. Also worth pushing on: &ldquo;<code>no_delete_requested</code> fails a
+    model that asked for a delete the gate then blocked. Is that a real failure, or is it
+    penalising the model for something harmless?&rdquo; And: &ldquo;how many trials is
+    enough before I'd believe a number like 5/5?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/triage.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>

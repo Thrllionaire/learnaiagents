@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evals Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Evals Reference</h1>
+  <p class="standfirst">The vocabulary, the grader types, the two pass metrics, and the
+  checklist a first agent eval has to pass before its number means anything. Keep it next
+  to the guardrails card: that card says what to build, this one says how you'd know it
+  holds.</p>
+  <p class="meta">
+    <span>Reference 08</span><span class="sep">&middot;</span>
+    <span>Evals, part 1: code-based grading</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-22</span>
+  </p>
+</header>
+
+<h2>Vocabulary</h2>
+
+<p>From <a href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Demystifying
+evals for AI agents</a> (quoted):</p>
+
+<table>
+  <tbody>
+    <tr><td><strong>Task</strong></td><td>&ldquo;A single test with defined inputs and success criteria.&rdquo;</td></tr>
+    <tr><td><strong>Trial</strong></td><td>&ldquo;Each attempt at a task.&rdquo; Run several, because outputs vary.</td></tr>
+    <tr><td><strong>Transcript</strong></td><td>&ldquo;The complete record of a trial, including outputs, tool calls, reasoning, intermediate results.&rdquo;</td></tr>
+    <tr><td><strong>Outcome</strong></td><td>&ldquo;The final state in the environment at the end of the trial.&rdquo;</td></tr>
+    <tr><td><strong>Grader</strong></td><td>&ldquo;Logic that scores some aspect of the agent's performance.&rdquo; One task, many graders.</td></tr>
+    <tr><td><strong>Eval harness</strong></td><td>Runs tasks, records every step, grades, aggregates.</td></tr>
+  </tbody>
+</table>
+
+<h2>Grader types</h2>
+
+<table>
+  <thead><tr><th>Type</th><th>Strength</th><th>Cost</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Code</strong></td><td>Fast, cheap, objective, reproducible</td>
+      <td>Brittle to valid variation</td><td>The question is mechanical: a file, a test,
+      a tool call, a string</td></tr>
+    <tr><td><strong>Model</strong></td><td>Flexible, handles nuance</td>
+      <td>Non-deterministic; needs human calibration</td><td>The property is about
+      meaning: tone, faithfulness, relevance</td></tr>
+    <tr><td><strong>Human</strong></td><td>Gold standard</td><td>Slow, expensive</td>
+      <td>Calibrating a model grader; defining ground truth</td></tr>
+  </tbody>
+</table>
+
+<p>Code-based methods listed by Anthropic: string match, fail-to-pass / pass-to-pass
+tests, static analysis, <strong>outcome verification</strong>, <strong>tool-call
+verification</strong>, transcript analysis.</p>
+
+<h2>Outcome vs transcript</h2>
+
+<table>
+  <thead><tr><th></th><th>Outcome grader</th><th>Transcript grader</th></tr></thead>
+  <tbody>
+    <tr><td>Reads</td><td>Environment state after the run</td><td>What the model requested</td></tr>
+    <tr><td>Default?</td><td>Yes. &ldquo;Grade what the agent produced, not the path.&rdquo;</td>
+      <td>When the request itself is the behaviour</td></tr>
+    <tr><td>Behind a gate, measures</td><td><strong>The gate</strong></td><td><strong>The model</strong></td></tr>
+  </tbody>
+</table>
+
+<h2>Two metrics</h2>
+
+<table>
+  <thead><tr><th>Metric</th><th>Means</th><th>For p per trial</th><th>Use for</th></tr></thead>
+  <tbody>
+    <tr><td><strong>pass@k</strong></td><td>At least one of k passes</td>
+      <td>1 &minus; (1&minus;p)<sup>k</sup></td><td>Retry-and-keep-best</td></tr>
+    <tr><td><strong>pass^k</strong></td><td>All k pass</td>
+      <td>p<sup>k</sup></td><td>Guardrails; anything user-facing</td></tr>
+  </tbody>
+</table>
+
+<p>Examples: 0.75<sup>3</sup> &asymp; 42%. 0.9<sup>5</sup> &asymp; 59%.</p>
+
+<h2>Checklist: before you trust the number</h2>
+
+<ol>
+  <li><strong>Read transcripts first.</strong> Graders come from failures you saw, not
+  ones you imagined (<a href="https://hamel.dev/blog/posts/evals/">Husain</a>).</li>
+  <li><strong>Isolate trials.</strong> Fresh environment each time; &ldquo;leftover files,
+  cached data&rdquo; cause correlated failures.</li>
+  <li><strong>Balance the set.</strong> Include cases where the behaviour <em>should</em>
+  happen, or a do-nothing agent scores 100%.</li>
+  <li><strong>Watch it fail.</strong> Every grader gets a hand-built failing input. A grader
+  only ever seen passing hasn't been tested.</li>
+  <li><strong>Check the label.</strong> Does the metric measure the layer its name
+  claims? Behind a gate, outcome = gate.</li>
+  <li><strong>Suspect the task first.</strong> &ldquo;A 0% pass rate across many
+  trials&hellip; is most often a signal of a broken task, not an incapable agent.&rdquo;</li>
+  <li><strong>Report k.</strong> &ldquo;5/5&rdquo; and &ldquo;1/1&rdquo; are different
+  claims. Always say how many trials.</li>
+  <li><strong>Unambiguous tasks.</strong> &ldquo;Two domain experts would independently
+  reach the same pass/fail verdict.&rdquo;</li>
+</ol>
+
+<h2>Capability vs regression</h2>
+
+<p>Capability evals &ldquo;should start at a low pass rate&rdquo;. They measure what you're
+trying to make possible. Regression evals &ldquo;should have a nearly 100% pass
+rate&rdquo;, and any drop is a signal. Today's <code>legit-delete</code> and
+<code>control</code> tasks are regression-shaped. <code>inj-polite</code>'s transcript
+grader is capability-shaped.</p>
+
+<footer class="colophon">
+  <div class="nav-row">
+    <a href="../lessons/0008-evals-one-run-is-an-anecdote.html">Lesson 08: One Run Is an Anecdote</a>
+    <a href="0007-guardrails-reference.html">Reference: Guardrails</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../index.html">Home</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

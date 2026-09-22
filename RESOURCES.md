@@ -52,6 +52,10 @@ parametric memory. Communities are where wisdom gets tested.
   permission system. Use for: the vocabulary a permission gate's policy reuses.
 
 ### Primary — evaluation
+- [Anthropic: Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+  The vocabulary (task, trial, transcript, outcome, grader, harness), code vs. model vs. human
+  graders, pass@k vs. pass^k with worked numbers, trial isolation, balanced problem sets, and
+  "a 0% pass rate is most often a broken task." Use for: designing any agent eval harness.
 - [Hamel Husain: Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
   Error analysis first, then tests. The three-level framework, and the rule that an LLM judge is
   worthless until you have measured its agreement with a human. Use for: everything eval-related.
