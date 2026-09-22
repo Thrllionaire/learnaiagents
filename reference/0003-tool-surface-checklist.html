@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tool Surface Checklist</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Tool Surface Checklist</h1>
+  <p class="standfirst">Run this over any tool before it ships. Print it. The five questions
+  are the card; everything below them is the worked detail.</p>
+  <p class="meta">
+    <span>Reference 03</span><span class="sep">&middot;</span>
+    <span>ACI design</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-20</span>
+  </p>
+</header>
+
+<h2>The five questions</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Question</th><th>Failing looks like</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><strong>Task or endpoint?</strong> Does the tool match a step a human would take?</td>
+      <td>One tool per route in your API docs</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Usable from the description alone</strong> by a capable new colleague?</td>
+      <td>"Searches the database and returns results."</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Every parameter name unambiguous?</strong></td>
+      <td><code>user</code> where you meant <code>user_id</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>Result high-signal?</strong> Meaning over identifiers.</td>
+      <td>A payload of UUIDs and <code>mime_type</code></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><strong>What happens at ten thousand rows?</strong></td>
+      <td>No default limit, or a silent truncation</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>1 &middot; Consolidate around the task</h2>
+
+<p><a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"More tools don't
+always lead to better outcomes."</a> Collapse a sequence a human would perform into one tool.</p>
+
+<table>
+  <thead><tr><th>Endpoint-shaped</th><th>Task-shaped</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_users</code> + <code>list_events</code> + <code>create_event</code></td><td><code>schedule_event</code></td></tr>
+    <tr><td><code>read_logs</code></td><td><code>search_logs</code></td></tr>
+    <tr><td><code>get_customer_by_id</code> + <code>list_transactions</code> + <code>list_notes</code></td><td><code>get_customer_context</code></td></tr>
+  </tbody>
+</table>
+
+<p><strong>The limit of the rule.</strong> Consolidation spends flexibility to buy tokens. Split
+when a human would genuinely want the pieces separately; merge when they would always take
+them together. Not "fewer tools", but <em>tools shaped like the work</em>.</p>
+
+<p><strong>Namespacing</strong>, once several tools could collide: by service
+(<code>asana_search</code>, <code>jira_search</code>) or by resource
+(<code>asana_projects_search</code>, <code>asana_users_search</code>). Prefix versus suffix had
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"non-trivial effects on
+tool-use evaluations"</a> — worth testing both if the agent is confusing them.</p>
+
+<h2>2 &middot; The description is prompt</h2>
+
+<p>The model cannot see your code. Name, description, and schema are its entire knowledge of
+the tool. Write them as onboarding notes for a capable colleague who joined this morning:
+make implicit context explicit, define niche terminology, and state how resources relate.</p>
+
+<pre><code><span class="c"># Weak — the model must guess whether this tool applies.</span>
+"description": "Searches the database and returns results."
+
+<span class="hl"><span class="c"># Strong — scope, contents, matching behaviour, and limits.</span></span>
+"description": (
+    "Search support tickets by free-text query across subject and body. "
+    "Covers the last 18 months only; older tickets are archived and not "
+    "searchable here. Returns the 20 most recent matches by default, "
+    "newest first. Use get_customer_context instead when you already "
+    "know the customer and want their full history."
+)</code></pre>
+
+<p>Anthropic calls prompt-engineering these descriptions
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"one of the most
+effective methods for improving tools"</a>; refinements to tool descriptions alone took Claude
+Sonnet 3.5 to a state-of-the-art SWE-bench Verified result.</p>
+
+<h2>3 &middot; Name parameters so only one reading survives</h2>
+
+<table>
+  <thead><tr><th>Ambiguous</th><th>Unambiguous</th><th>What the type could not say</th></tr></thead>
+  <tbody>
+    <tr><td><code>user</code></td><td><code>user_id</code></td><td>id, email, handle, or display name</td></tr>
+    <tr><td><code>date</code></td><td><code>date_from</code> / <code>date_to</code></td><td>a bound, or a single day</td></tr>
+    <tr><td><code>id</code></td><td><code>order_id</code></td><td>which resource it belongs to</td></tr>
+    <tr><td><code>limit</code></td><td><code>max_results</code></td><td>rows, bytes, or seconds</td></tr>
+  </tbody>
+</table>
+
+<p>Describe every parameter, including optional ones, and state the default an omitted
+parameter produces. Consider <code>strict: true</code> on the tool definition (requires
+<code>additionalProperties: false</code> plus <code>required</code>) when malformed arguments
+would be expensive — it guarantees the input validates against your schema exactly.</p>
+
+<h2>4 &middot; Return meaning, not identifiers</h2>
+
+<div class="pair">
+  <div>
+    <h4>Low-signal</h4>
+<pre><code>{"uuid": "7f3c9a1e-...",
+ "owner_uuid": "a91f-...",
+ "mime_type": "image/png",
+ "256px_image_url": "...",
+ "status_code": 3}</code></pre>
+  </div>
+  <div>
+    <h4>High-signal</h4>
+<pre><code>{"name": "Q3 revenue deck",
+ "owner": "Priya Raman",
+ "file_type": "image",
+ "image_url": "...",
+ "status": "awaiting review"}</code></pre>
+  </div>
+</div>
+
+<p>Resolving UUIDs into semantic language
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"significantly improves
+Claude's precision in retrieval tasks by reducing hallucinations"</a>. Keep identifiers only
+where a downstream call needs them.</p>
+
+<p><strong>Let the agent choose verbosity.</strong> A <code>response_format</code> enum of
+<code>"concise"</code> / <code>"detailed"</code> lets it pay for identifiers only when it will
+use them. Anthropic's Slack example: 206 tokens detailed against 72 concise.</p>
+
+<p><strong>Format</strong> — XML, JSON, or Markdown — has
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"no one-size-fits-all
+solution"</a>. Test rather than assume.</p>
+
+<h2>5 &middot; Cap the response, and say that you did</h2>
+
+<p>Pagination, range selection, filtering, or truncation — with sensible defaults. Claude Code
+caps tool responses at <strong>25,000 tokens</strong> by default.</p>
+
+<pre><code><span class="c"># Silent: the agent answers confidently from a slice it cannot see is a slice.</span>
+return rows[:50]
+
+<span class="hl"><span class="c"># Steering: states the limit, then names the cheaper strategy.</span></span>
+return (
+    f"Showing 50 of {total} matches, newest first. "
+    f"Narrow with date_from/date_to or a more specific query "
+    f"rather than requesting the full set."
+)</code></pre>
+
+<h2>Proving it, in one line</h2>
+
+<p>Measure a tool surface the way you measured the agent: on a fixed task, record
+<strong>tool calls</strong>, <strong>API calls</strong>, <strong>input tokens</strong>,
+<strong>tool errors</strong>, and <strong>whether the final answer was right</strong>. A
+redesign that halves the tokens and keeps the answer is a result you can put in a design doc.
+This is the seam where tool design meets evals (Lesson 08): Anthropic builds evaluation tasks
+that need dozens of tool calls, runs them in a plain <code>while</code> loop, then feeds the
+transcripts back to Claude to refactor the tools — and reports that the refactored versions beat
+their own expert hand-written ones on held-out tests.</p>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Anthropic: Writing Effective Tools for Agents</a> — every principle and figure on this card</li>
+    <li><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic: Building Effective Agents</a> — the ACI argument, and why it deserves UI-level effort</li>
+    <li><a href="https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview">Claude API: Tool Use</a> — authoritative schema fields, <code>strict</code>, parallel calls</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0003-tool-surface-design.html">Lesson 03: Designing a Tool an Agent Can Use</a>
+    <a href="0002-decision-and-patterns.html">Reference: Decision Ladder &amp; Patterns</a>
+    <a href="0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

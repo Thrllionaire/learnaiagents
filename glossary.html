@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary</title>
+<link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<h1 id="ai-agents-glossary">AI Agents Glossary</h1>
+<p>The canonical vocabulary for this workspace. Lessons adhere to these
+terms. A term is promoted here once it has been taught <em>and</em> used
+correctly — it is a record of compressed knowledge, not a dictionary to
+read cold.</p>
+<h2 id="terms">Terms</h2>
+<p><strong>Agent</strong>: A system where an LLM dynamically directs its
+own process and tool usage to reach a goal. Contrast with [workflow],
+where the code path is fixed in advance. <em>Avoid</em>: AI assistant,
+bot, copilot</p>
+<p><strong>Workflow</strong>: A system where LLM calls and tools are
+orchestrated through predefined code paths that the developer chose. The
+LLM fills in steps; it does not choose them. <em>Avoid</em>: Chain,
+pipeline (both are specific workflow shapes, not the category)</p>
+<p><strong>Agent loop</strong>: The control structure that makes an
+agent agentic: repeatedly call the model, execute any tools it asked
+for, feed the results back, until the model stops asking for tools.
+<em>Avoid</em>: The while loop, ReAct loop, orchestration layer</p>
+<p><strong>Harness</strong>: The code you own around the model — the
+loop, the tool dispatch, the gating, the logging. The model emits
+intent; the harness decides what actually happens. <em>Avoid</em>:
+Wrapper, framework, runtime</p>
+<p><strong>Tool</strong>: A function you expose to the model as a named,
+schema’d capability it may request. The model never executes a tool; it
+emits a request that the harness executes. <em>Avoid</em>: Function
+call, plugin, skill, action</p>
+<p><strong><code>stop_reason</code></strong>: The field on a model
+response stating why generation ended. <code>"tool_use"</code> means the
+model is asking the harness to act and the loop must continue;
+<code>"end_turn"</code> means the model is finished. <em>Avoid</em>:
+Finish reason, exit code</p>
+<p><strong>Turn</strong>: One model response plus any tool results it
+triggered. An agent run is a sequence of turns; the whole sequence is
+re-sent as context on every iteration. <em>Avoid</em>: Step, iteration,
+round</p>
+<p><strong>Augmented LLM</strong>: The base building block of every
+agentic system: a model with retrieval, tools, and memory available to
+it. It is not yet an agent — a single augmented call is still one call.
+<em>Avoid</em>: RAG system, tool-enabled model</p>
+<p><strong>Prompt chaining</strong>: A [workflow] where calls run in a
+fixed sequence, each one’s output feeding the next. Trades latency for
+accuracy. <em>Avoid</em>: Chain-of-thought (a prompting technique, not
+an architecture), pipeline</p>
+<p><strong>Routing</strong>: A [workflow] where one call classifies the
+input and <em>your code</em> branches to one of N specialised paths.
+Depends on classification being measurably accurate. <em>Avoid</em>:
+Dispatch, triage, intent detection</p>
+<p><strong>Parallelization</strong>: A [workflow] that fans out into
+concurrent calls and aggregates the results. <em>Sectioning</em> splits
+one task into independent subtasks; <em>voting</em> runs the same task
+several times for confidence. <em>Avoid</em>: Ensembling, map-reduce</p>
+<p><strong>Orchestrator–workers</strong>: A [workflow] where one call
+decides which subtasks are needed, workers run them, and a merge step
+combines the output. The subtasks are dynamic; the fan-out-and-merge
+topology is fixed by you, which is what keeps it a workflow.
+<em>Avoid</em>: Multi-agent system, swarm, supervisor pattern</p>
+<p><strong>Evaluator–optimizer</strong>: A [workflow] that alternates a
+generator and a critic until the critic passes the output. Needs clear
+evaluation criteria to be worth its cost. <em>Avoid</em>:
+Self-correction, reflection loop</p>
+<p><strong>ACI (agent–computer interface)</strong>: The surface an agent
+acts through — tool names, schemas, descriptions, and the text of tool
+results. Named by analogy to a human UI, and deserving the same design
+effort. <em>Avoid</em>: Tool API, function interface</p>
+<p><strong>Cost of agency</strong>: What you buy when the model rather
+than your code owns the control flow: superlinear token growth,
+sequential latency, non-determinism, compounding errors, and a wider
+blast radius. The reason the burden of proof sits on the agent.
+<em>Avoid</em>: Overhead, tax</p>
+<p><strong>Tool surface</strong>: The complete set of tools an agent is
+given, plus the text they return. The unit of design — individual tools
+are judged by how they fit the surface, not in isolation. The concrete
+instance of an [ACI]. <em>Avoid</em>: Tool list, toolkit, API
+surface</p>
+<p><strong>Consolidation</strong>: Collapsing a sequence a human would
+perform into a single tool (<code>schedule_event</code> rather than
+<code>list_users</code> + <code>list_events</code> +
+<code>create_event</code>). Buys round trips and context; spends
+flexibility. The trade is the design decision, not the consolidation
+itself. <em>Avoid</em>: Merging tools, coarse-grained tools,
+batching</p>
+<p><strong>High-signal context</strong>: Tool output written in terms
+the model can reason over — names, states, and dates rather than UUIDs,
+enum codes, and epoch milliseconds. Resolving identifiers into meaning
+measurably reduces hallucination in retrieval. <em>Avoid</em>: Clean
+output, human-readable output, formatted results</p>
+<p><strong>Namespacing</strong>: Prefixing tool names by service or
+resource (<code>asana_search</code>, <code>asana_projects_search</code>)
+so the model does not confuse tools that do similar things to different
+systems. Matters once several tools could plausibly answer the same
+call. <em>Avoid</em>: Prefixing, scoping, grouping</p>
+<p><strong><code>is_error</code></strong>: An optional boolean on a
+<code>tool_result</code> block marking that the tool call failed. It is
+a flag on an ordinary result, not a separate channel — the loop
+continues, the model reads the content string, and decides what to do
+next. <em>Avoid</em>: Exception, error response, failure callback</p>
+<p><strong>Retry budget</strong>: The two or three corrected attempts
+Claude makes at a failed tool call before apologising to the user.
+Finite, expensive (a full round trip each), and steered only by the text
+of the error message. The reason error strings are [prompt].
+<em>Avoid</em>: Retries, attempts, backoff</p>
+<p><strong>Steering error</strong>: An error string written to change
+what the model does next: what happened, why, and what to call instead.
+Contrast with an opaque error — a traceback or code — which buys
+identical retries because it names nothing the model can act on.
+<em>Avoid</em>: Good error message, friendly error, user-facing
+error</p>
+<p><strong>Failure routing</strong>: Deciding which layer handles a
+failure before deciding how to word it: the model (bad input, persistent
+outage), your harness (transient outage), or nobody (an empty result is
+an answer). Some failures should never reach the model, and some should
+end the run. <em>Avoid</em>: Error handling, exception strategy</p>
+<blockquote>
+<p><strong>Ambiguity resolved:</strong> In the wider field “agent” is
+used loosely for anything LLM-powered. In this workspace, “agent” always
+means the model chooses the control flow. If the developer chose it, it
+is a <strong>workflow</strong> — regardless of how many LLM calls it
+makes.</p>
+</blockquote>
+<blockquote>
+<p><strong>Ambiguity resolved:</strong> Anthropic’s taxonomy files
+orchestrator–workers and evaluator–optimizer as
+<strong>workflows</strong>, not agents, even though the model makes real
+decisions inside them. The test this workspace uses: if <em>you</em>
+fixed the topology and the model only fills it in, it is a workflow. If
+the model picks the topology, it is an agent.</p>
+</blockquote>
+<blockquote>
+<p><strong>Ambiguity resolved:</strong> The <strong>tool schema</strong>
+(what the model knows exists) and the <strong>dispatch table</strong>
+(what the harness can execute) are two separate contracts. “Adding a
+tool” is two actions, and drift between them fails silently. See
+<code>learning-records/0002-schema-dispatch-are-two-contracts.md</code>.</p>
+</blockquote>
+<blockquote>
+<p><strong>Ambiguity resolved:</strong> An <strong>empty result is not
+an error</strong>. Marking “no rows matched” with
+<code>is_error: true</code> tells the model its tool is broken, so it
+spends the [retry budget] on a call that already succeeded. Return it as
+an ordinary result, stated in words — and never let a real failure come
+back looking like an empty answer.</p>
+</blockquote>
+
+<footer>
+  <div class="pagenav">
+    <a href="index.html">Home</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

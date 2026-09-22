@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflow or Agent?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Workflow or Agent?</h1>
+  <p class="standfirst">You can now build an agent. This lesson is about the more valuable
+  skill: knowing when not to, and being able to say so in a room full of people who want
+  one.</p>
+  <p class="meta">
+    <span>Lesson 02</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, yesterday</h2>
+
+<p>Two questions on <a href="0001-the-agent-loop.html">Lesson 01</a> before anything new.
+Answer from memory; do not scroll back.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>A ten-step agent run makes ten API
+  calls. Why does it cost far more than ten times the first call?</p>
+  <div class="opts">
+    <button class="opt" data-correct>The whole transcript is re-sent every call</button>
+    <button class="opt">The model charges more for later calls</button>
+    <button class="opt">Each call retries until a tool succeeds</button>
+    <button class="opt">Longer runs need a larger max_tokens value</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. The model is stateless, so iteration <em>n</em> pays for every token of iterations 1 through <em>n</em>&minus;1 again. Input tokens accumulate roughly quadratically with run length. Hold onto this number — it is the single strongest argument you have against building an agent, and you will use it later in this lesson."
+    data-when-wrong="The transcript is re-sent in full on every iteration. The model holds no state between calls, so a ten-step run pays for the growing history ten times over — input tokens grow roughly with the square of the run length. This is the cost of agency, and it is the argument you will reach for most often when pushing back on an agent.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>You add a working function to your
+  dispatch table. The agent never calls it. Most likely cause?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Its schema was never added to tools</button>
+    <button class="opt">Its name collides with a reserved tool</button>
+    <button class="opt">Its result was returned as an error</button>
+    <button class="opt">Its arguments were rejected by the model</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Your bug from Lesson 01, and worth having again in your hands. The schema and the dispatch table are two separate contracts: the schema is what the model <em>knows exists</em>, the table is what your harness <em>can execute</em>. Nothing keeps them in sync and the drift fails silently — you get a plausible answer built from fewer tools than you thought."
+    data-when-wrong="This is the bug you hit in Lesson 01: the function was in <code>TOOLS</code> but not in <code>TOOL_SCHEMAS</code>. Adding a tool is two actions, not one. The model can only request what the schema advertises, and the mismatch raises nothing — the run just quietly does less than you designed.">
+  </div>
+</div>
+
+<h2>The spectrum, and the one question</h2>
+
+<p>"Agent" is a marketing word and a technical word, and the gap between them is where
+careers get made. Anthropic's definition is the one the field actually uses, and it is
+narrow: <a href="https://www.anthropic.com/engineering/building-effective-agents">"<strong>Workflows</strong>
+are systems where LLMs and tools are orchestrated through predefined code paths.
+<strong>Agents</strong> &hellip; are systems where LLMs dynamically direct their own
+processes and tool usage."</a></p>
+
+<p>Notice what does <em>not</em> appear in that definition: the number of LLM calls, the
+presence of tools, or how clever the system looks. A five-call, three-tool, RAG-backed
+pipeline is a <em class="term">workflow</em> if you drew the arrows. A two-call system is an
+<em class="term">agent</em> if the model chose the second call. The distinguishing variable
+is <strong>who owns the control flow</strong> — and you already proved this to yourself in
+Lesson 01, where the run ended because the model set <code>stop_reason</code>, not because
+your code counted to two.</p>
+
+<p>So the decision collapses to one question, asked before you see any input:</p>
+
+<div class="note why">
+  <span class="label">The question</span>
+  <p><strong>Can you draw the flowchart in advance?</strong></p>
+  <p>If yes, and it is one box, you want a single call. If yes, and it is several boxes, you
+  want a workflow. If you genuinely cannot draw it — because the steps depend on what earlier
+  steps discover — that is the case an agent exists for, and the only one.</p>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 372" role="img" aria-labelledby="dtitle ddesc" xmlns="http://www.w3.org/2000/svg">
+  <title id="dtitle">The escalation ladder</title>
+  <desc id="ddesc">Three questions asked in order. If no step needs judgement, use plain
+  code. Otherwise, if you cannot draw the path in advance, use an agent. Otherwise, if it is
+  one step, use a single call; if more, use a workflow.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-faint)"/>
+    </marker>
+  </defs>
+  <g font-family="var(--sans)" font-size="13">
+
+    <rect x="30" y="16" width="300" height="56" rx="5" fill="var(--bg-panel)" stroke="var(--rule)"/>
+    <text x="46" y="39" fill="var(--ink)" font-weight="600">1. Does any step need judgement</text>
+    <text x="46" y="57" fill="var(--ink)" font-weight="600">that no rule can express?</text>
+    <line x1="330" y1="44" x2="380" y2="44" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="340" y="36" fill="var(--ink-soft)" font-size="11.5">no</text>
+    <rect x="392" y="22" width="220" height="44" rx="5" fill="var(--bg)" stroke="var(--accent)"/>
+    <text x="408" y="49" fill="var(--accent)" font-family="var(--mono)" font-size="12.5" font-weight="650">No LLM: plain code</text>
+
+    <line x1="180" y1="72" x2="180" y2="106" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="188" y="94" fill="var(--ink-soft)" font-size="11.5">yes</text>
+
+    <rect x="30" y="108" width="300" height="56" rx="5" fill="var(--bg-panel)" stroke="var(--rule)"/>
+    <text x="46" y="131" fill="var(--ink)" font-weight="600">2. Can you draw the whole path</text>
+    <text x="46" y="149" fill="var(--ink)" font-weight="600">before you see the input?</text>
+    <line x1="330" y1="136" x2="380" y2="136" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="340" y="128" fill="var(--ink-soft)" font-size="11.5">no</text>
+    <rect x="392" y="114" width="220" height="44" rx="5" fill="var(--bg)" stroke="var(--accent)"/>
+    <text x="408" y="141" fill="var(--accent)" font-family="var(--mono)" font-size="12.5" font-weight="650">Agent: model-chosen</text>
+
+    <line x1="180" y1="164" x2="180" y2="198" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="188" y="186" fill="var(--ink-soft)" font-size="11.5">yes</text>
+
+    <rect x="30" y="200" width="300" height="56" rx="5" fill="var(--bg-panel)" stroke="var(--rule)"/>
+    <text x="46" y="223" fill="var(--ink)" font-weight="600">3. Does that path have more</text>
+    <text x="46" y="241" fill="var(--ink)" font-weight="600">than one LLM step in it?</text>
+    <line x1="330" y1="228" x2="380" y2="228" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="340" y="220" fill="var(--ink-soft)" font-size="11.5">no</text>
+    <rect x="392" y="206" width="220" height="44" rx="5" fill="var(--bg)" stroke="var(--accent)"/>
+    <text x="408" y="233" fill="var(--accent)" font-family="var(--mono)" font-size="12.5" font-weight="650">One call: no loop</text>
+
+    <line x1="180" y1="256" x2="180" y2="290" stroke="var(--ink-faint)" marker-end="url(#ah)"/>
+    <text x="188" y="278" fill="var(--ink-soft)" font-size="11.5">yes</text>
+
+    <rect x="30" y="292" width="300" height="48" rx="5" fill="var(--bg)" stroke="var(--accent)"/>
+    <text x="46" y="322" fill="var(--accent)" font-family="var(--mono)" font-size="12.5" font-weight="650">Workflow: fixed code path</text>
+  </g>
+</svg>
+<figcaption>Ask them in order and stop at the first exit. The ladder is deliberately biased
+downward: you only reach "agent" by failing to draw the path, never by wanting one.</figcaption>
+</figure>
+
+<p>Question 1 is the one people skip, and it is the one that saves the most money.
+Anthropic's guidance opens with it: <a href="https://www.anthropic.com/engineering/building-effective-agents">"find
+the simplest solution possible, and only increase complexity when needed. This might mean not
+building agentic systems at all."</a></p>
+
+<h2>The five workflow shapes</h2>
+
+<p>If you land on "workflow", you are not inventing an architecture. There are five shapes in
+common use, and they cover nearly everything. Learn them as a vocabulary: naming the pattern
+you are proposing is most of what makes a design review go well.</p>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>Shape</th><th>Use when</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Prompt chaining</strong></td>
+      <td>Call → call → call, output of one feeding the next</td>
+      <td>The task splits cleanly into fixed subtasks. You are trading latency for accuracy</td>
+    </tr>
+    <tr>
+      <td><strong>Routing</strong></td>
+      <td>Classify, then branch to one of N specialised paths</td>
+      <td>Distinct categories are better handled separately, and classification is reliable</td>
+    </tr>
+    <tr>
+      <td><strong>Parallelization</strong><br><span style="font-size:0.8125rem;color:var(--ink-soft)">sectioning &amp; voting</span></td>
+      <td>Run N calls at once, then aggregate. <em>Sectioning</em>: different subtasks. <em>Voting</em>: same task, several attempts</td>
+      <td>Subtasks are independent (speed), or you need several perspectives on one thing (confidence)</td>
+    </tr>
+    <tr>
+      <td><strong>Orchestrator&ndash;workers</strong></td>
+      <td>One call decides the subtasks, spawns workers, merges results</td>
+      <td>You cannot predict <em>which</em> subtasks are needed, but you can predict the merge</td>
+    </tr>
+    <tr>
+      <td><strong>Evaluator&ndash;optimizer</strong></td>
+      <td>Generate, critique, regenerate, until the critic passes it</td>
+      <td>You have clear evaluation criteria <em>and</em> iterative refinement measurably helps</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="label">Where the line genuinely blurs</span>
+  <p>Orchestrator&ndash;workers and evaluator&ndash;optimizer both hand the model a real
+  decision, and people argue about whether they are workflows at all. The useful distinction
+  is scope: in both patterns <em>you</em> fixed the shape of the graph — a fan-out and a
+  merge, a generate-critique cycle — and the model only fills in the contents. In an agent,
+  the model picks the shape too. If someone challenges you on this in an interview, that is
+  the answer: the boundary is whether the topology is yours.</p>
+</div>
+
+<h2>What agency actually costs</h2>
+
+<p>Every one of these is cheaper than an agent, and the gap is not small. The reason the
+ladder is biased downward is that agency is a purchase, and it is worth being able to itemise
+the bill.</p>
+
+<table>
+  <thead><tr><th>You pay in</th><th>Because</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Tokens</strong></td>
+      <td>The transcript is re-sent every iteration. Input cost grows roughly with the square of the run length — the thing you just recalled</td>
+    </tr>
+    <tr>
+      <td><strong>Latency</strong></td>
+      <td>Iterations are strictly sequential: the model cannot choose step 4 until it has seen the result of step 3. A workflow's independent branches can run at once</td>
+    </tr>
+    <tr>
+      <td><strong>Determinism</strong></td>
+      <td>The same input can take a different path on Tuesday. You cannot write a unit test for a path you did not choose</td>
+    </tr>
+    <tr>
+      <td><strong>Error compounding</strong></td>
+      <td>A wrong step becomes context for the next step. Per-step accuracy of 95% over ten steps is about 60% end-to-end, and the run still <em>looks</em> plausible</td>
+    </tr>
+    <tr>
+      <td><strong>Blast radius</strong></td>
+      <td>An agent that can act for many turns needs, in Anthropic's words, "some level of trust in its decision-making" — and therefore sandboxing, gating, and review that a workflow does not</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">The failure you have already seen</span>
+  <p>In Lesson 01 your agent ran with a missing schema and returned a confident, well-formed,
+  partly-unfounded answer. Nothing crashed. That is the <em>normal</em> failure mode of an
+  agentic system, and it is what "compounding errors" feels like from the outside: not a
+  stack trace, but a plausible paragraph.</p>
+  <p>A workflow fails differently. When step 3 of a fixed chain breaks, you know it was step
+  3. That debuggability is a real, costed feature, and it is a legitimate reason to choose a
+  workflow even when an agent would work.</p>
+</div>
+
+<p>None of this says don't build agents. It says the burden of proof sits on the agent.
+Agents earn their cost on <a href="https://www.anthropic.com/engineering/building-effective-agents">"open-ended
+problems where it's difficult or impossible to predict the required number of steps, and
+where you can't hardcode a fixed path."</a> When that is true, a workflow cannot do the job
+at any price, and the argument is over.</p>
+
+<h2>Triage six of them</h2>
+
+<p>This is the lesson. Read each scenario, commit to an answer, then read why. You will be
+doing exactly this, out loud, in interviews and design reviews — the muscle is classification
+under a little pressure, not recall of the definitions.</p>
+
+<div class="triage" data-triage>
+  <div class="triage-stage" data-stage></div>
+  <div class="triage-bar">
+    <span data-score></span>
+    <button data-next>Next &rarr;</button>
+  </div>
+  <script type="application/json" data-cases>
+{
+  "options": [
+    { "id": "code", "label": "No LLM: plain code" },
+    { "id": "one",  "label": "One call: no loop" },
+    { "id": "flow", "label": "Workflow: fixed path" },
+    { "id": "agent","label": "Agent: model-chosen" }
+  ],
+  "cases": [
+    {
+      "prompt": "Your logs already wrap every username in a <code>&lt;user id=...&gt;</code> tag. Legal wants those names replaced with the id before logs leave the building — about 40 million lines a day.",
+      "answer": "code",
+      "why": {
+        "code": "The input is text, but the task is not a judgement call. The tag tells you exactly what to replace. A regex is deterministic, auditable, free, and about six orders of magnitude faster. Reaching for a model here is the most common and most expensive mistake in this list.",
+        "one": "Per-line model calls would cost five figures a day to do something <code>re.sub</code> does exactly right. Question 1 of the ladder exists to catch this: no step here needs judgement a rule cannot express.",
+        "flow": "Adding structure does not fix the underlying error, which is using a model at all. The names are already machine-identified by the tag.",
+        "agent": "Nothing here is unpredictable, and you would be handing 40 million/day of PII to a non-deterministic system to do a string substitution."
+      }
+    },
+    {
+      "prompt": "5,000 student essays need a 1&ndash;5 score against a published rubric, plus two sentences of justification. No lookups, no tools, and the rubric never changes.",
+      "answer": "one",
+      "why": {
+        "one": "Real judgement (so not plain code), but one input, one output, no tool access, no branching. The fact that you run it 5,000 times is irrelevant — a <code>for</code> loop over independent calls is not agency, because nothing the model returns changes what happens next.",
+        "code": "Rubric scoring with written justification is exactly the judgement a rule cannot express. This one has earned its model call.",
+        "flow": "Volume is not a reason for a workflow. A workflow means multiple <em>dependent</em> LLM steps in a path you drew; here there is only one step, repeated. If you later split it into 'score' then 'justify', <em>that</em> would be a chain — and you would want evidence it beats one call.",
+        "agent": "The step count is fixed at one and known in advance. Nothing is open-ended."
+      }
+    },
+    {
+      "prompt": "Marketing wants every new blog post turned into a tweet thread, and then the thread translated into Japanese and Spanish for the regional accounts.",
+      "answer": "flow",
+      "why": {
+        "flow": "Prompt chaining. Two dependent steps, in an order you fixed before seeing any post, with the translations parallelizable at the end. You drew the arrows, so it is a workflow no matter how many calls it makes.",
+        "one": "You could ask for all of it in one call, and it is worth trying as a baseline. But chaining is the standard move here precisely because it trades latency for accuracy: the model does one thing at a time, and you get a checkable artifact between steps.",
+        "code": "Writing a tweet thread and translating it are both judgement. This needs a model.",
+        "agent": "This is the classic over-build. Multiple LLM calls feel agentic, but you can draw this flowchart today, for every post you will ever receive. The model chooses nothing about the path."
+      }
+    },
+    {
+      "prompt": "Support tickets arrive and must go to one of three places: the refunds prompt, the technical-troubleshooting prompt, or a human. Your classifier hits 94% on a labelled sample.",
+      "answer": "flow",
+      "why": {
+        "flow": "Routing. A classification step, then a branch to one of N paths you wrote. The categories are known, the destinations are known, and classification is measurably reliable — which is the precondition the pattern depends on.",
+        "one": "One prompt handling all three cases is the thing routing exists to improve on: specialised prompts stay shorter and more accurate, and you can change the refunds prompt without risking the technical one.",
+        "code": "Deciding what a ticket is <em>about</em> is judgement, and a keyword rule will fail on the tickets that matter.",
+        "agent": "The set of destinations is fixed and small. Handing the model control of the path buys you nothing and costs you the ability to say which branch fired. Keep the choice in a <code>match</code> statement where you can log it."
+      }
+    },
+    {
+      "prompt": "An internal coding assistant gets \"make the auth middleware return 401 instead of 500 on an expired token.\" It must find the relevant files, read them, edit, run the tests, and fix whatever it broke.",
+      "answer": "agent",
+      "why": {
+        "agent": "Try to draw this flowchart. How many files? Unknown until it searches. How many edits? Unknown until it reads. How many test-fix cycles? Unknown until they run. The step count is determined by what earlier steps discover — the definition of the case an agent is for.",
+        "flow": "You would be writing a fixed path that is wrong for every input except the one you had in mind. The search step cannot tell you in advance how many edit steps to schedule.",
+        "one": "One call cannot run the tests, and \"whatever it broke\" is only knowable after execution. This needs environmental feedback in a loop.",
+        "code": "This is the case agents were built for; a deterministic program cannot do it."
+      }
+    },
+    {
+      "prompt": "A weekly brief: \"which of our named competitors changed pricing this quarter, and how?\" Some have a pricing page, some only announce in a blog, one buried it in a PDF, and two did nothing at all.",
+      "answer": "agent",
+      "why": {
+        "agent": "Unpredictable depth, per competitor. The agent must notice that the pricing page is unchanged, go looking at the blog, and stop when there is nothing there. You cannot hardcode how many fetches each one needs, because it depends on what the first fetch returns.",
+        "flow": "A fixed \"fetch each pricing page and diff\" workflow is a defensible <em>v1</em>, and worth naming as one — it just silently misses the blog and the PDF. If you propose the workflow, propose the measurement that would tell you it is missing things.",
+        "one": "No tools, no fetching, no current data. A single call here produces confident fiction about competitor pricing.",
+        "code": "Diffing a pricing page is code; deciding that a blog post announces a price change is not."
+      }
+    }
+  ]
+}
+  </script>
+</div>
+
+<h2>Saying no, defensibly</h2>
+
+<p>You will usually be arguing <em>against</em> an agent, often with someone senior who has
+already told a customer the word. Three moves make that argument land.</p>
+
+<ol>
+  <li><strong>Concede the capability, contest the fit.</strong> Never "an agent can't do
+  that." Always "an agent can do that, and here is what it costs us versus the version that
+  can be tested." You are having a budget conversation, not a capability one.</li>
+  <li><strong>Quantify one axis.</strong> Pick the cheapest number to produce — usually
+  tokens or latency — and measure it on the real task. "The agent version is 7&times; the
+  tokens and 4&times; the p95" ends an argument that an opinion cannot. You will produce
+  exactly this number in the build task below.</li>
+  <li><strong>Name the trigger that would change your mind.</strong> This is the move that
+  separates a seasoned engineer from a contrarian. "Ship the router; if the fallback bucket
+  exceeds 15% of tickets, that is the signal that the categories don't cover reality and we
+  escalate to an agent." You have now proposed an experiment rather than won a debate.</li>
+</ol>
+
+<div class="note why">
+  <span class="label">The sentence worth memorising</span>
+  <p><a href="https://www.anthropic.com/engineering/building-effective-agents">"Success in
+  the LLM space isn't about building the most sophisticated system. It's about building the
+  <em>right</em> system for your needs."</a></p>
+  <p>It sounds like a platitude until you have watched a team spend a quarter on an agent
+  that a routing workflow would have beaten on accuracy, cost, and ship date.</p>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: write the three ladder questions in order, and next to each, the exit
+it produces. Then name the five workflow patterns.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="Q1: ...&#10;  no →&#10;Q2: ...&#10;  no →&#10;Q3: ...&#10;&#10;Patterns: ..."></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <ol>
+      <li><strong>Does any step need judgement no rule can express?</strong> No → plain code.</li>
+      <li><strong>Can you draw the whole path before seeing the input?</strong> No → agent.</li>
+      <li><strong>Does that path have more than one LLM step?</strong> No → single call. Yes → workflow.</li>
+    </ol>
+    <p>Patterns: <strong>prompt chaining</strong>, <strong>routing</strong>,
+    <strong>parallelization</strong> (sectioning, voting), <strong>orchestrator&ndash;workers</strong>,
+    <strong>evaluator&ndash;optimizer</strong>.</p>
+    <p style="margin-bottom:0">If you got the ladder but not the five names, that is the
+    normal split, and the names matter less than the order of the questions. If you got the
+    ladder <em>backwards</em> — starting from "is this agentic?" — re-read the figure. The
+    direction of the bias is the whole point.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<p>Time to produce the number from move 2. You will implement the same task twice and measure
+the difference, which turns "agents are expensive" from something you read into something you
+have on your own terminal.</p>
+
+<div class="note win">
+  <span class="label">Your task, about 12 minutes</span>
+  <p>Work in <code>practice/02-workflow-vs-agent/</code>. Run everything with
+  <code>uv run python ...</code>.</p>
+  <ol>
+    <li>Copy your Lesson 01 agent to <code>agent_measured.py</code>. Inside the loop, after
+    each response, accumulate <code>response.usage.input_tokens</code> and
+    <code>response.usage.output_tokens</code>, and count the API calls. Print all three
+    totals at the end.</li>
+    <li>Write <code>workflow.py</code>: the <em>same</em> question — weather and time in Tokyo
+    — with no loop and no <code>tools=</code>. You call <code>get_weather("Tokyo")</code> and
+    <code>get_time("Asia/Tokyo")</code> yourself, in Python, then make <strong>one</strong>
+    <code>messages.create</code> call that includes both results in the prompt and asks for
+    the answer. Print the same three totals.</li>
+    <li>Compare. Write both sets of numbers into <code>NOTES.md</code>. How many times more
+    input tokens did the agent spend to reach the same sentence?</li>
+    <li><strong>Now find the input that breaks the workflow.</strong> Think of a question your
+    hardcoded version answers wrongly or not at all, but the agent handles. Run it against
+    both. Write down what each did.</li>
+    <li>Finish with one paragraph in <code>NOTES.md</code>: given those numbers and that
+    broken input, which would you ship, and <em>what would have to change for you to switch</em>?
+    This is the interview answer, and writing it down is the exercise.</li>
+  </ol>
+</div>
+
+<div class="note">
+  <span class="label">A prediction to make before you run it</span>
+  <p>Guess the token ratio now, and write the guess down before step 3. The gap between your
+  guess and the measurement is the calibration you are building — being wrong here is
+  informative in a way that reading the right answer is not.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong>
+  <a href="https://www.anthropic.com/engineering/building-effective-agents">Building Effective
+  Agents</a> (Anthropic Engineering) &mdash; this time the middle of the piece: the five
+  workflow patterns, then "Agents", then "Combining and customizing these patterns". Roughly
+  fifteen minutes, and the diagrams are the part to keep. You read the opening for Lesson 01;
+  this completes it.</p>
+  <p><strong>Cross-check:</strong>
+  <a href="https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf">OpenAI's
+  Practical Guide to Building Agents</a> (PDF) reaches a near-identical conclusion from a
+  different vendor. Optional, but where two competitors independently agree, the advice is
+  probably about the problem rather than the product.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0002-decision-and-patterns.html">Reference: Decision Ladder &amp; Patterns</a>
+    <a href="../reference/0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="0001-the-agent-loop.html">Lesson 01: The Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../resources.html">Resources</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Tool surface design. If the answer <em>is</em> an agent, the
+  schema is the model's entire view of what it can do &mdash; which makes it prompt, not
+  documentation.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring back the token ratio, and bring
+    back the input that broke the workflow &mdash; both are worth arguing about. Good things
+    to push on: "isn't orchestrator&ndash;workers just an agent?", "where does a ReAct loop
+    sit on this ladder?", and "what do I say when someone wants an agent for the r&eacute;sum&eacute;
+    value?" All three have real answers.
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/triage.js"></script>
+</body>
+</html>

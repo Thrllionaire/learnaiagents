@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error Message Patterns</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Error Message Patterns</h1>
+  <p class="standfirst">What a tool says when it cannot do the thing. Five failure classes,
+  where each is handled, and the sentence shape that works. Print it and keep it next to the
+  tool surface card.</p>
+  <p class="meta">
+    <span>Reference 04</span><span class="sep">&middot;</span>
+    <span>ACI design</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-20</span>
+  </p>
+</header>
+
+<h2>The routing table</h2>
+
+<table>
+  <thead><tr><th>Failure</th><th>Handled by</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Bad input from the model</strong><br>wrong value, missing argument, wrong format</td>
+      <td>The model</td>
+      <td><code>is_error: true</code> + constraint + valid example</td>
+    </tr>
+    <tr>
+      <td><strong>Empty answer</strong><br>the call worked; there is nothing to return</td>
+      <td>Nobody &mdash; it is an answer</td>
+      <td>Ordinary result, stated in words. <strong>Never <code>is_error</code>.</strong></td>
+    </tr>
+    <tr>
+      <td><strong>Transient outage</strong><br>503, connection reset, rate limit, first attempt</td>
+      <td>Your harness</td>
+      <td>Retry with backoff inside the tool. The model never hears about it.</td>
+    </tr>
+    <tr>
+      <td><strong>Persistent outage</strong><br>still failing after your retries</td>
+      <td>Shared</td>
+      <td><code>is_error: true</code> + what is down + what is still possible</td>
+    </tr>
+    <tr>
+      <td><strong>Your own bug</strong><br>missing config, <code>KeyError</code>, broken contract</td>
+      <td>You</td>
+      <td>Raise. End the run. Page a human. No retry can succeed.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note why">
+  <span class="label">The single most useful fact on this card</span>
+  <p><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">"If
+  a tool request is invalid or missing parameters, Claude will retry 2-3 times with corrections
+  before apologizing to the user."</a> Your error string is the only steering those retries get.
+  Budget accordingly.</p>
+</div>
+
+<h2>The sentence shape</h2>
+
+<p>Three beats, in order. Anthropic's own worked example fits in six words:
+<code>"Rate limit exceeded. Retry after 60 seconds."</code></p>
+
+<ol>
+  <li><strong>What happened</strong>, in the tool's own vocabulary &mdash; quoting the input back
+  where the input is the problem.</li>
+  <li><strong>Why</strong> &mdash; the rule or state that made it fail.</li>
+  <li><strong>What to do instead</strong> &mdash; a call the model can actually make, or an
+  explicit "waiting will not help".</li>
+</ol>
+
+<p>Beat three is the one that gets dropped, and it is the one that converts a retry into a
+recovery.</p>
+
+<h2>Before and after</h2>
+
+<div class="pair">
+  <div>
+    <p class="pair-label">Opaque</p>
+<pre><code>TypeError: string indices
+must be integers, not 'str'
+
+ConnectionError
+
+Error: failed
+
+[]</code></pre>
+  </div>
+  <div>
+    <p class="pair-label">Steering</p>
+<pre><code>No customer named 'priya raman'.
+Names match exactly, including
+capitalisation - try 'Priya Raman'.
+
+Ticket service unavailable after
+3 retries. Order data is fine;
+answer from orders and say tickets
+could not be checked.
+
+Rate limit exceeded. Retry after
+60 seconds.
+
+No late orders for Priya Raman.</code></pre>
+  </div>
+</div>
+
+<p>Source for the principle:
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"you can
+prompt-engineer your error responses to clearly communicate specific and actionable
+improvements, rather than opaque error codes or tracebacks."</a></p>
+
+<h2>The shape on the wire</h2>
+
+<pre><code>{
+  <span class="s">"type"</span>: <span class="s">"tool_result"</span>,
+  <span class="s">"tool_use_id"</span>: <span class="s">"toolu_01A09q90qw90lq917835lq9"</span>,
+  <span class="s">"content"</span>: <span class="s">"ConnectionError: the weather service API is not available (HTTP 500)"</span>,
+  <span class="s">"is_error"</span>: <span class="k">true</span>
+}</code></pre>
+
+<ul>
+  <li><code>is_error</code> is <strong>optional</strong> and defaults to absent. It is a flag on
+  a normal result, not a separate channel.</li>
+  <li>A failed call still needs a <code>tool_result</code>. Dropping it produces
+  <em>"tool_use ids were found without tool_result blocks immediately after"</em>.</li>
+  <li>All results for one assistant turn go back in <strong>one</strong> user message, failures
+  included, with the <code>tool_result</code> blocks <strong>first</strong> in the content array
+  and any text after them.</li>
+  <li>Server tools (web search, code execution) handle their own errors. You do not return
+  <code>is_error</code> for those.</li>
+</ul>
+
+<h2>Three rules worth memorising</h2>
+
+<ol>
+  <li><strong>An empty set is data, not a failure.</strong> <code>is_error</code> on "no rows"
+  spends the retry budget on a call that already worked, and ends in an apology for a correct
+  lookup.</li>
+  <li><strong>Never let a failure look like an empty answer.</strong> "No open tickets" and "the
+  ticket service is down" produce different answers, and only one of them is true. This is
+  silent truncation wearing a different hat.</li>
+  <li><strong>Prefer the fix that makes the error unwritable.</strong> Case-insensitive
+  matching deletes a whole error class; <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use">strict
+  tool use</a> (<code>strict: true</code>) "guarantees that tool inputs will always match your
+  schema exactly, preventing missing parameters and type mismatches."</li>
+</ol>
+
+<h2>Two things to be careful about</h2>
+
+<p><strong>Tracebacks leak.</strong> Table names, file paths and library versions end up in a
+context window that the model may summarise or quote later. Tool results are also the boundary
+where untrusted content enters &mdash; the docs flag them as
+<a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">where
+indirect prompt injection lands</a> &mdash; so keep that channel narrow and yours.</p>
+
+<p><strong>Errors persist.</strong> Every failed attempt stays in the transcript and is re-sent
+on every subsequent turn. A verbose error is not paid for once; it is paid for on every
+remaining call of the run.</p>
+
+<h2>Recovery is a system property, not just a string</h2>
+
+<p>Anthropic's production research system pairs the two halves explicitly:
+<a href="https://www.anthropic.com/engineering/multi-agent-research-system">"letting the agent
+know when a tool is failing and letting it adapt works surprisingly well"</a>, combined with
+<a href="https://www.anthropic.com/engineering/multi-agent-research-system">"deterministic
+safeguards like retry logic and regular checkpoints."</a> They also note the reason checkpoints
+matter: <a href="https://www.anthropic.com/engineering/multi-agent-research-system">"When errors
+occur, we can't just restart from the beginning: restarts are expensive and frustrating for
+users."</a> An agent mid-run is stateful; the transcript <em>is</em> the state, and resuming
+beats restarting.</p>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Claude docs: Handle tool calls</a> &mdash; <code>tool_result</code> shape, <code>is_error</code>, the three documented error classes, the 2&ndash;3 retry behaviour</li>
+    <li><a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Anthropic: Writing Effective Tools for Agents</a> &mdash; prompt-engineering error responses</li>
+    <li><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic: How We Built Our Multi-Agent Research System</a> &mdash; adaptation plus deterministic safeguards</li>
+    <li><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use">Claude docs: Strict tool use</a> &mdash; removing invalid-input errors structurally</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0004-when-the-tool-fails.html">Lesson 04: When the Tool Fails</a>
+    <a href="0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

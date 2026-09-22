@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>When the Tool Fails</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>When the Tool Fails</h1>
+  <p class="standfirst">An error message is the only instruction your harness gets to give a
+  confused agent, and it arrives with a retry budget of about three. Most harnesses spend it
+  on a Python traceback.</p>
+  <p class="meta">
+    <span>Lesson 04</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory before anything new.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>Two of your tools could plausibly answer
+  the same step. What does the model decide between them on?</p>
+  <div class="opts">
+    <button class="opt" data-correct>The description you wrote</button>
+    <button class="opt">The docstring you wrote</button>
+    <button class="opt">The annotations you wrote</button>
+    <button class="opt">The implementation you wrote</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right &mdash; and note what that rules out. The model never sees your source, your types, or your tests. Name, description, and schema are the entire basis for the choice, which is why the description is prompt rather than documentation."
+    data-when-wrong="The model has no access to your code at all &mdash; not the body, not the docstring, not the annotations. It sees only what you put in the tool definition you sent. That is the whole argument for treating the description as prompt: it is the only evidence available at the moment of the decision.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>On a <em>two-call</em> agent run, where
+  do the extra input tokens mostly go?</p>
+  <div class="opts">
+    <button class="opt" data-correct>The tool schemas, re-sent on every call</button>
+    <button class="opt">The transcript, re-sent on every call</button>
+    <button class="opt">The system prompt, rebuilt on every call</button>
+    <button class="opt">The tool results, retained in every call</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Correct, and this is the refinement your own measurement forced. On a short run there is barely any transcript to resend &mdash; your 22.6&times; was mostly schemas, which the workflow never sends at all. An agent pays for its schemas on every turn and its transcript on every turn after the first; which term dominates depends on run length."
+    data-when-wrong="Careful &mdash; the transcript answer is the textbook one and it is wrong here. Your agent run was two calls long, so there was almost no transcript to resend. The 1,511 input tokens against the workflow's 67 were mostly <em>tool schemas</em>, re-sent in full on both calls.">
+  </div>
+</div>
+
+<div class="recall">
+  <span class="label">Two minutes of unfinished business</span>
+  <p style="margin:0 0 0.7rem;font-size:0.9375rem">Lesson 02 asked for one input that the
+  hardcoded workflow answers wrongly and the agent handles. That box is still empty, and it is
+  the half of the lesson that makes the number mean something. Sixty seconds, from memory, no
+  code:</p>
+  <textarea placeholder="An input the Tokyo weather workflow gets wrong:&#10;&#10;What the workflow does with it:&#10;&#10;What the agent does instead:"></textarea>
+  <details>
+    <summary>Reveal after you have written one</summary>
+    <p style="margin-bottom:0">Anything that moves the <em>choice</em> of tool into the input:
+    &ldquo;is it warmer in Tokyo or Lisbon?&rdquo; (the workflow has one hardcoded city),
+    &ldquo;what time is it there?&rdquo; alone (it always calls both tools and pays for both),
+    or &ldquo;will I need a coat tomorrow?&rdquo; (needs forecast, and the workflow silently
+    answers from today). The pattern: a workflow is correct exactly on the inputs you drew the
+    path for. The agent's premium is the price of the inputs you did not.</p>
+  </details>
+</div>
+
+<h2>You already wrote this lesson</h2>
+
+<p>Your <code>good_tools.py</code> works for Priya Raman. Call it twice more and it does this:</p>
+
+<pre><code>&gt;&gt;&gt; list_late_orders_and_tickets(<span class="s">"Marcus Dubois"</span>)
+<span class="hl">TypeError: '&gt;' not supported between instances of 'NoneType' and 'int'</span>
+
+&gt;&gt;&gt; list_late_orders_and_tickets(<span class="s">"priya raman"</span>)
+<span class="hl">TypeError: string indices must be integers, not 'str'</span></code></pre>
+
+<p>Neither is a crash, because your loop catches it &mdash; Lesson 01's harness, still doing
+exactly what you told it to:</p>
+
+<pre><code><span class="k">except</span> Exception <span class="k">as</span> e:
+    results.append({
+        <span class="s">"type"</span>: <span class="s">"tool_result"</span>,
+        <span class="s">"tool_use_id"</span>: block.id,
+        <span class="hl">        <span class="s">"content"</span>: <span class="s">f"Error: {e}"</span>,</span>
+        <span class="s">"is_error"</span>: <span class="k">True</span>,
+    })</code></pre>
+
+<p>So the run continues, and the model's entire briefing on what went wrong is the string
+<code>Error: '&gt;' not supported between instances of 'NoneType' and 'int'</code>. Read it as
+the model must, with no access to your source: it does not name the customer, the field, the
+tool, or anything the model could do differently. It is not even clear whether retrying would
+help.</p>
+
+<p>Marcus Dubois is the interesting one. Nothing is broken. He has one order, <code>NW-4421</code>,
+promised 18 September and <strong>still not shipped</strong> &mdash; so
+<code>shipped_at_epoch_ms</code> is <code>null</code> and your comparison meets a
+<code>None</code>. Your tool cannot answer a question about an overdue delivery for the one
+customer in the dataset whose delivery is overdue. It reports this as a type error.</p>
+
+<h2>A failure is not an exception. It is a turn.</h2>
+
+<p>The mechanic is worth stating precisely, because it is what makes error text
+consequential. A failed tool call does not unwind anything. It comes back as an ordinary
+<code>tool_result</code> block carrying an extra flag:</p>
+
+<pre><code>{
+  <span class="s">"type"</span>: <span class="s">"tool_result"</span>,
+  <span class="s">"tool_use_id"</span>: <span class="s">"toolu_01A09q90qw90lq917835lq9"</span>,
+  <span class="s">"content"</span>: <span class="s">"ConnectionError: the weather service API is not available (HTTP 500)"</span>,
+  <span class="s">"is_error"</span>: <span class="k">true</span>
+}</code></pre>
+
+<p>That is the documented shape, verbatim from
+<a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">the
+tool-use docs</a>, and <code>is_error</code> is <em>optional</em> &mdash; a flag on a result,
+not a channel of its own. The loop turns again, the model reads your string alongside
+everything else in context, and decides what to do next. <strong>The model is the recovery
+mechanism.</strong> Your error message is the instruction it recovers by.</p>
+
+<div class="note why">
+  <span class="label">The budget you are spending</span>
+  <p>The docs are specific about what happens next: <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">&ldquo;If
+  a tool request is invalid or missing parameters, Claude will retry 2-3 times with corrections
+  before apologizing to the user.&rdquo;</a> That is your whole allowance. Three attempts, each
+  one costing a full round trip, each one steered only by the sentence you wrote. A traceback
+  buys three identical retries and then an apology.</p>
+</div>
+
+<p>Handled well, this is not damage control &mdash; it is the thing agents are unusually good
+at. From Anthropic's write-up of their production research system:
+<a href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;letting the
+agent know when a tool is failing and letting it adapt works surprisingly well.&rdquo;</a> The
+same post names the other half of the pair, which you will meet in the drill below: they
+combine that adaptability with <a
+href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;deterministic
+safeguards like retry logic and regular checkpoints.&rdquo;</a> Some failures are the model's
+to handle. Some are yours, and should never reach it.</p>
+
+<h2>Why a traceback is the worst available choice</h2>
+
+<p>Anthropic's guidance is a single sentence and it is the whole of this lesson's advice:
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">&ldquo;If a tool call
+raises an error (for example, during input validation), you can prompt-engineer your error
+responses to clearly communicate specific and actionable improvements, rather than opaque error
+codes or tracebacks.&rdquo;</a> Three reasons it matters more than it sounds:</p>
+
+<ul>
+  <li><strong>It is not actionable.</strong> <code>'&gt;' not supported between instances of
+  'NoneType' and 'int'</code> describes a line of code the model has never seen. It names no
+  input, no constraint, and no alternative. The model's best available move is to try the
+  identical call again.</li>
+  <li><strong>It is expensive and low-signal.</strong> A full traceback is a hundred tokens of
+  file paths and frame lines, and it stays in the transcript for every remaining turn of the
+  run &mdash; the Lesson 02 arithmetic applies to your failures too.</li>
+  <li><strong>It puts your internals in a context window.</strong> Table names, file paths, and
+  library versions become part of a document the model may later summarise or quote. The same
+  docs warn that tool results are the untrusted-content boundary and are
+  <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">where
+  indirect prompt injection lands</a>; filling that channel with your stack trace is the wrong
+  direction of travel. Lesson 07 picks this up properly.</li>
+</ul>
+
+<h2>Five failures, five different jobs</h2>
+
+<p>&ldquo;Write better error messages&rdquo; is not yet advice. The useful question is
+<em>whose problem is this</em>, because the answer decides which layer handles it &mdash; and
+only one of the five rows below is answered by writing a nicer string.</p>
+
+<table>
+  <thead><tr><th>What happened</th><th>Whose problem</th><th>What the result must do</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>The model called it wrong &mdash; bad value, missing argument, wrong format</td>
+      <td>The model's</td>
+      <td>State the constraint, quote back what it sent, and show one valid call. It has two or
+      three tries to use this.</td>
+    </tr>
+    <tr>
+      <td>The call was fine; the answer is empty<span class="tag">no late orders</span></td>
+      <td>Nobody's</td>
+      <td><strong>Not an error.</strong> Return a normal result that says so in words. Flagging
+      it teaches the agent its tool is broken, and it will retry a call that worked.</td>
+    </tr>
+    <tr>
+      <td>Transient outage &mdash; HTTP 503, connection reset, rate limit</td>
+      <td>Yours, for now</td>
+      <td>Retry inside the tool, with backoff. The model should not spend a turn on something
+      your <code>for</code> loop can fix for free.</td>
+    </tr>
+    <tr>
+      <td>Persistent outage &mdash; still failing after your retries</td>
+      <td>Shared</td>
+      <td>Say what is unavailable, whether waiting helps, and what else could answer the
+      question. <span class="tag">"Rate limit exceeded. Retry after 60 seconds."</span></td>
+    </tr>
+    <tr>
+      <td>Your bug &mdash; missing config, <code>KeyError</code>, a contract you broke</td>
+      <td>Yours</td>
+      <td>Raise. End the run and tell the human. No wording makes an impossible call succeed,
+      so a retry budget spent here is pure cost.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note win">
+  <span class="label">The cheapest error is the one you made unwritable</span>
+  <p>Before writing a message for row one, ask whether the failure should exist. Matching
+  <code>c["full_name"].lower() == name.lower()</code> deletes the <code>"priya raman"</code>
+  case entirely. At the schema level, <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use">strict
+  tool use</a> (<code>strict: true</code>) goes further: the docs say it
+  &ldquo;guarantees that tool inputs will always match your schema exactly, preventing missing
+  parameters and type mismatches.&rdquo; Same move you have made twice now &mdash; prefer the
+  fix that makes the bug structurally impossible over the fix that handles it well.</p>
+</div>
+
+<h2>Which layer handles it?</h2>
+
+<p>Five calls, one fixed set of answers. Commit before you click; the wrong answers carry the
+reasoning.</p>
+
+<div class="triage" data-triage>
+  <div class="triage-stage" data-stage></div>
+  <div class="triage-bar">
+    <span data-score></span>
+    <button data-next>Next &rarr;</button>
+  </div>
+  <script type="application/json" data-cases>
+  {
+    "options": [
+      { "id": "model",  "label": "Tell the model: result with is_error" },
+      { "id": "quiet",  "label": "Tell the model: an ordinary result" },
+      { "id": "harness", "label": "Handle it silently inside the tool" },
+      { "id": "stop",   "label": "Raise, end the run, page a human" }
+    ],
+    "cases": [
+      {
+        "prompt": "Your loop calls <code>list_late_orders_and_tickets(\"priya raman\")</code>. No customer matches, because the lookup compares names exactly.",
+        "answer": "model",
+        "why": {
+          "model": "Only the model can supply a different name, so it must be told &mdash; and told enough to fix it: quote the failed input back, state that matching is exact, and show the working form. Worth saying aloud though: the better repair is lower-casing both sides, which removes this error class instead of documenting it.",
+          "quiet": "Tempting, but this one genuinely failed &mdash; the agent asked about a customer and got nothing. If you return it as an ordinary result, the model may read 'no data' as 'no late orders' and confidently answer that Priya has no complaints. Flag it, and say what to send instead.",
+          "harness": "Your code cannot invent the correct spelling. It could normalise case, which is the real fix &mdash; but for a genuinely unknown name there is nothing to silently handle, and swallowing it produces an answer built on nothing.",
+          "stop": "Far too blunt. A misspelled argument is the most recoverable failure there is: the model has the budget and the information to correct it, given one useful sentence."
+        }
+      },
+      {
+        "prompt": "The lookup succeeds. Priya Raman has two orders and both arrived on time, so the late-orders list comes back empty.",
+        "answer": "quiet",
+        "why": {
+          "quiet": "The row people get wrong in production. Nothing failed here; 'none' is a real answer and often the answer the user wanted. Return it in words &mdash; <code>\"no late orders for Priya Raman\"</code> &mdash; so it cannot be misread as missing data.",
+          "model": "This is the expensive mistake. <code>is_error: true</code> tells the model its tool did not work, so it spends its retry budget calling the same tool again, and may end by apologising for a lookup that succeeded perfectly. An empty set is data.",
+          "harness": "There is nothing to handle. The tool did its job; the answer is simply 'none'. Silently returning nothing at all is worse than saying so &mdash; an empty payload reads as a bug.",
+          "stop": "Ending a run because a customer has no late orders would fail on the happy path. This is the outcome the tool exists to detect."
+        }
+      },
+      {
+        "prompt": "The ticket service returns <code>HTTP 503 Service Unavailable</code>. It is the first attempt, and this service is known to recover within a second or two.",
+        "answer": "harness",
+        "why": {
+          "harness": "Retry with backoff inside the tool. A model round trip costs a full re-send of schemas and transcript to solve something three lines of Python solve for nothing &mdash; this is exactly the 'deterministic safeguards like retry logic' half of Anthropic's pairing.",
+          "model": "Technically survivable, but you are paying a whole turn, and its tokens, to ask the model to do what a retry loop does better and faster. Save the model's attention for decisions only it can make.",
+          "quiet": "Dangerous. Reporting a transient outage as an ordinary result means the model reads 'no open tickets' when the truth is 'we could not look'. Never let a failure masquerade as an empty answer.",
+          "stop": "Killing a run on one 503 from a service that recovers in seconds makes your agent less reliable than the service it calls."
+        }
+      },
+      {
+        "prompt": "Same ticket service, still <code>503</code> after three retries with backoff. The orders database is fine.",
+        "answer": "model",
+        "why": {
+          "model": "Your code is out of options; the model is not. Say what is unavailable, that waiting will not help soon, and what it can still do &mdash; the order history answers half the question, and a partial answer flagged as partial beats a dead run.",
+          "harness": "You have already spent your retries. Looping again turns a degraded service into a hung agent, and the user sees nothing at all.",
+          "quiet": "This is the silent-truncation failure from Lesson 03 in a new costume. 'No open tickets' and 'the ticket service is down' produce very different answers, and only one of them is true.",
+          "stop": "Defensible if tickets were the entire question &mdash; but here half the data is available. Ending the run throws away an answer the model could still give, correctly caveated."
+        }
+      },
+      {
+        "prompt": "The tool raises <code>KeyError: 'DATABASE_URL'</code> on its first call. The environment variable was never set.",
+        "answer": "stop",
+        "why": {
+          "stop": "Every retry will fail identically, so the entire budget goes on impossible calls before the model apologises for a problem no user could have caused. Fail loudly, to the human who can export the variable.",
+          "model": "The model cannot set your environment. Handing it a config bug produces two or three wasted round trips and an apology that hides the actual fault from you.",
+          "harness": "Retrying a missing environment variable is an infinite loop with a bill attached. Nothing about the second attempt differs from the first.",
+          "quiet": "The worst option available. Reporting a broken deployment as an ordinary empty result gets you a confident, fluent, entirely fabricated answer &mdash; the wrong-but-plausible failure mode you have already seen once."
+        }
+      }
+    ]
+  }
+  </script>
+</div>
+
+<h2>Now write two</h2>
+
+<p>Recognising a bad error message is not the skill. Producing a good one under mild time
+pressure is. Write first, in the box &mdash; the criteria only appear once you have committed,
+which is the point.</p>
+
+<div class="rewrite" data-rewrite>
+  <div class="rw-stage" data-stage></div>
+  <div class="rw-bar">
+    <span data-score></span>
+    <button data-next>Next &rarr;</button>
+  </div>
+  <script type="application/json" data-cases>
+  {
+    "cases": [
+      {
+        "num": "Rewrite 1 of 2",
+        "situation": "The agent calls your tool with <code>customer_name: \"priya raman\"</code>. No record matches. Write the string your tool returns with <code>is_error: true</code>.",
+        "current": "Error: string indices must be integers, not 'str'",
+        "placeholder": "The tool_result content the model will read…",
+        "rubric": [
+          "Quotes the failed input back, so the model can see what it actually sent.",
+          "States the rule that was broken — matching is exact, including capitalisation.",
+          "Offers a next call the model can make, not just a diagnosis.",
+          "Contains no Python type names, no traceback, no internal field names."
+        ],
+        "answer": "No customer named 'priya raman'. Names are matched exactly, including capitalisation — try 'Priya Raman'. If you are unsure of the spelling, call search_customers with a partial name first.",
+        "note": "Notice the shape: <em>what happened</em>, <em>why</em>, <em>what to do instead</em>. The docs' own example is the same three beats in six words &mdash; <code>\"Rate limit exceeded. Retry after 60 seconds.\"</code> And once you have written this, write the one-line fix that makes it unnecessary: <code>.lower()</code> on both sides of the comparison."
+      },
+      {
+        "num": "Rewrite 2 of 2",
+        "situation": "Marcus Dubois has one order, <code>NW-4421</code>, promised 18 September, not yet shipped — so <code>shipped_at_epoch_ms</code> is <code>null</code> and your comparison raises. He has no tickets. Write what your tool should return instead. Think before you type: is this an error at all?",
+        "current": "Error: '>' not supported between instances of 'NoneType' and 'int'",
+        "placeholder": "The tool_result content — and decide whether is_error belongs on it…",
+        "rubric": [
+          "Returns a successful result, without is_error — nothing actually failed.",
+          "Says 'no late orders' in words rather than returning a bare empty list.",
+          "Surfaces the unshipped overdue order instead of silently dropping it.",
+          "Stays in the tool's stated vocabulary: names, ISO dates, states — no nulls, no epochs.",
+          "Does not imply Marcus has no delivery problem, because he plainly does."
+        ],
+        "answer": "{\"customer\": \"Marcus Dubois\",\n \"late_orders\": [],\n \"note\": \"No delivered-late orders. One order is overdue but has not shipped yet, so it is not counted as late by this tool.\",\n \"unshipped_overdue\": [{\"item\": \"NW-4421\", \"promised\": \"2025-09-18\", \"status\": \"processing\"}],\n \"open_tickets\": []}",
+        "note": "This is the one that decides whether the lesson landed. The crash looked like a null-handling bug; it was a <strong>design</strong> bug. Your description promises that unshipped orders are excluded from <code>late_orders</code> &mdash; fine &mdash; but a support agent asking &ldquo;is Marcus's delivery late?&rdquo; needs to know an overdue order exists. Handling the null with <code>if o[\"shipped_at_epoch_ms\"] is None: continue</code> would stop the traceback and produce a confidently wrong answer instead."
+      }
+    ]
+  }
+  </script>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: the five failure classes and where each is handled. Then one sentence on
+why <code>is_error: true</code> on an empty result set is a bug.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="1. Model called it wrong      →&#10;2. Empty answer               →&#10;3. Transient outage           →&#10;4. Persistent outage          →&#10;5. Your own bug               →&#10;&#10;is_error on an empty result is a bug because..."></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <ol>
+      <li>Bad input from the model &rarr; result with <code>is_error</code>, saying what valid looks like.</li>
+      <li>Empty answer &rarr; ordinary result, in words. Not an error.</li>
+      <li>Transient outage &rarr; retry inside the tool; the model never hears about it.</li>
+      <li>Persistent outage &rarr; result with <code>is_error</code>, naming what is down and what remains possible.</li>
+      <li>Your own bug &rarr; raise, end the run, tell the human.</li>
+    </ol>
+    <p style="margin-bottom:0">And the empty set: <code>is_error</code> means <em>the tool did
+    not work</em>. The tool worked. The model spends two or three retries on a call that already
+    succeeded, then apologises to the user for a lookup that was correct the first time. An
+    empty set is an answer.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<p>Smaller than the last two, and the deliverable is text rather than a number &mdash; which is
+the harder task, not the easier one.</p>
+
+<div class="note win">
+  <span class="label">Your task, about 12 minutes</span>
+  <p>Everything is in <code>practice/04-tool-errors/</code>. Run with
+  <code>uv run python practice/04-tool-errors/failing_tools.py "&lt;name&gt;"</code>.
+  <code>failing_tools.py</code> is your own Lesson 03 tool, unchanged except that the loop now
+  prints every <code>tool_result</code> exactly as the model receives it.</p>
+  <ol>
+    <li><strong>Watch it fail.</strong> Run it for <code>"Marcus Dubois"</code> and for
+    <code>"priya raman"</code>. Read the printed <code>tool_result</code> &mdash; not the
+    traceback, the string the model was handed &mdash; and read the final answer it produced
+    from that string. Note in <code>NOTES.md</code> what the agent told the user.</li>
+    <li><strong>Write the three strings.</strong> In <code>NOTES.md</code>, before touching the
+    code: the unknown-name error, the Marcus result, and the no-late-orders result. These three
+    strings are the deliverable of this lesson.</li>
+    <li><strong>Then make them true.</strong> Fix <code>failing_tools.py</code> so it returns
+    them: guard the null, decide what an unshipped overdue order is, and return the empty case
+    as a normal result.</li>
+    <li><strong>Re-run all three names</strong> &mdash; <code>Marcus Dubois</code>,
+    <code>priya raman</code>, <code>Sofia Almeida</code> &mdash; and check the agent's final
+    answer to the user is now correct in all three, including the two that used to crash.</li>
+    <li><strong>One line, out loud.</strong> Which of the three failures should not have been an
+    error message at all, but a change to the tool? Bring the answer to the terminal.</li>
+  </ol>
+</div>
+
+<div class="note trap">
+  <span class="label">The trap in step 3</span>
+  <p>The fastest null guard is <code>if o["shipped_at_epoch_ms"] is None: continue</code>. It
+  stops the traceback and it is wrong &mdash; it makes the agent say Marcus has no late
+  deliveries, which is worse than a crash because nobody will notice. If you catch yourself
+  reaching for it, that is the lesson.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong>
+  <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Handle
+  tool calls</a> (Claude docs) &mdash; the authoritative shapes for <code>tool_result</code> and
+  <code>is_error</code>, including the three documented error classes and the 2&ndash;3 retry
+  behaviour. Ten minutes, and it is reference you will return to. Then re-read the
+  &ldquo;Optimizing tool responses&rdquo; section of
+  <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing Effective
+  Tools for Agents</a> with failures in mind &mdash; it is two paragraphs you skimmed last
+  week.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0004-error-message-patterns.html">Reference: Error Message Patterns</a>
+    <a href="../reference/0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="../reference/0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="0003-tool-surface-design.html">Lesson 03: Tool Surface Design</a>
+    <a href="0002-workflow-or-agent.html">Lesson 02: Workflow or Agent?</a>
+    <a href="0001-the-agent-loop.html">Lesson 01: The Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Context engineering. Everything you have written into the
+  transcript so far &mdash; schemas, results, errors, retries &mdash; competes for one finite
+  budget, and something has to decide what leaves.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Paste the three strings in. Written work
+    is the deliverable this time, and a sentence that reads well to you may still be missing the
+    &ldquo;what to do instead&rdquo; beat &mdash; that is worth a second pair of eyes. Also
+    worth pushing on: &ldquo;how do I know my error messages are working without reading every
+    transcript?&rdquo;, &ldquo;when does a partial answer become dishonest?&rdquo;, and
+    &ldquo;if the model can recover from anything, why gate anything at all?&rdquo; The last one
+    is Lesson 07 and it has a sharp answer.
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/triage.js"></script>
+<script src="../assets/rewrite.js"></script>
+</body>
+</html>

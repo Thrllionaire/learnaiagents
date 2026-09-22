@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designing a Tool an Agent Can Use</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Designing a Tool an Agent Can Use</h1>
+  <p class="standfirst">Your agent is only as good as the surface it acts through. This lesson
+  is about the part most people treat as plumbing and Anthropic treats as prompt engineering:
+  the tool definition itself.</p>
+  <p class="meta">
+    <span>Lesson 03</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory before anything new &mdash; one from each previous lesson.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>On the decision ladder, which answer
+  sends you to "build an agent"?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Failing to draw the path in advance</button>
+    <button class="opt">Needing more than one model call</button>
+    <button class="opt">Having several tools already written</button>
+    <button class="opt">Wanting the model to use judgement</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right, and the direction matters: you arrive at &ldquo;agent&rdquo; by <em>failing</em> a test, never by wanting one. Judgement alone gets you an LLM call; several calls you can draw gets you a workflow."
+    data-when-wrong="The ladder is biased downward on purpose. Judgement needed &rarr; you need an LLM at all. Path drawable &rarr; single call or workflow. You only reach &ldquo;agent&rdquo; when you <em>cannot</em> draw the path, because the next step depends on what the last one found.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>The model requests three tools in one
+  response. How do the results go back?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Three results in one user message</button>
+    <button class="opt">Three results in three user messages</button>
+    <button class="opt">One result per loop iteration, ordered</button>
+    <button class="opt">Three results in one assistant message</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Correct, and there is a behavioural reason beyond validity: splitting results across messages teaches the model, in-context, to stop asking for parallel calls. You pay for that in round trips forever after."
+    data-when-wrong="All <code>tool_result</code> blocks for one assistant turn go back in a <strong>single</strong> user message &mdash; including failures, which come back as results with <code>is_error: true</code> rather than being dropped. Splitting them is not just invalid shape; it trains the model out of parallel calls.">
+  </div>
+</div>
+
+<h2>The schema is the model's whole world</h2>
+
+<p>In Lesson 01 you wrote a function, added it to <code>TOOLS</code>, and watched the agent
+ignore it &mdash; because the schema never made it into <code>TOOL_SCHEMAS</code>. That bug
+has a lesson in it bigger than the fix. <strong>The model has no access to your code.</strong>
+It cannot read the function body, the docstring, the types, or the tests. Everything it knows
+about what it can do comes from the name, the description, and the parameter schema you sent.</p>
+
+<p>Which means those fields are not documentation. They are <em class="term">prompt</em> —
+a section of the prompt you happen to write in JSON. Anthropic is explicit that
+prompt-engineering the descriptions is
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"one of the most
+effective methods for improving tools"</a>, and reports that precise refinements to tool
+descriptions alone were enough to take Claude Sonnet 3.5 to a state-of-the-art result on
+SWE-bench Verified. No model change. Better tool text.</p>
+
+<p>The surface as a whole — names, schemas, descriptions, and the text your tools return — has
+a name worth using in a design review: the <em class="term">ACI</em>, the agent–computer
+interface. The analogy is load-bearing. You would not ship a human UI without design effort;
+this is the agent's UI, and
+<a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic argues it
+deserves as much investment as the human-facing one</a>.</p>
+
+<div class="note why">
+  <span class="label">The reframe</span>
+  <p>Stop asking "what functions does my service have?" Start asking <strong>"what would a
+  capable new colleague need, on their first day, to finish this task?"</strong> Everything
+  below follows from taking that question literally.</p>
+</div>
+
+<h2>1. Design for the task, not for the API</h2>
+
+<p>The default move is to wrap each endpoint in a tool. It feels principled — thin, complete,
+no opinions. It is also the most reliable way to build an agent that burns twenty thousand
+tokens finding a customer's email address.</p>
+
+<p>Anthropic's guidance is blunt about it:
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"More tools don't
+always lead to better outcomes."</a> The examples are worth memorising because they are all
+the same move — collapse a <em>sequence a human would perform</em> into one tool:</p>
+
+<table>
+  <thead><tr><th>Instead of</th><th>Build</th><th>Because</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>list_users</code>, <code>list_events</code>, <code>create_event</code></td>
+      <td><code>schedule_event</code></td>
+      <td>Three round trips and two intermediate result sets collapse into one</td>
+    </tr>
+    <tr>
+      <td><code>read_logs</code></td>
+      <td><code>search_logs</code></td>
+      <td>Filtering happens before the context window, not inside it</td>
+    </tr>
+    <tr>
+      <td><code>get_customer_by_id</code>, <code>list_transactions</code>, <code>list_notes</code></td>
+      <td><code>get_customer_context</code></td>
+      <td>The agent never needed the pieces — it needed the picture</td>
+    </tr>
+  </tbody>
+</table>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 224" role="img" aria-labelledby="rtitle rdesc" xmlns="http://www.w3.org/2000/svg">
+  <title id="rtitle">Round trips under two tool surfaces</title>
+  <desc id="rdesc">The endpoint-shaped surface needs four model calls, and the transcript
+  carries every intermediate result forward. The task-shaped surface needs one call, and only
+  the answer enters the context.</desc>
+  <defs>
+    <marker id="rah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-faint)"/>
+    </marker>
+  </defs>
+  <g font-family="var(--sans)" font-size="12">
+    <text x="14" y="18" fill="var(--ink-soft)" font-size="11" font-weight="650">ENDPOINT-SHAPED</text>
+    <g font-family="var(--mono)" font-size="10.5">
+      <rect x="14" y="30" width="112" height="26" rx="3" fill="var(--bg-panel)" stroke="var(--rule)"/>
+      <text x="24" y="47" fill="var(--ink)">list_customers</text>
+      <rect x="160" y="30" width="112" height="26" rx="3" fill="var(--bg-panel)" stroke="var(--rule)"/>
+      <text x="170" y="47" fill="var(--ink)">get_customer</text>
+      <rect x="306" y="30" width="112" height="26" rx="3" fill="var(--bg-panel)" stroke="var(--rule)"/>
+      <text x="316" y="47" fill="var(--ink)">list_orders</text>
+      <rect x="452" y="30" width="112" height="26" rx="3" fill="var(--bg-panel)" stroke="var(--rule)"/>
+      <text x="462" y="47" fill="var(--ink)">list_tickets</text>
+    </g>
+    <line x1="126" y1="43" x2="156" y2="43" stroke="var(--ink-faint)" marker-end="url(#rah)"/>
+    <line x1="272" y1="43" x2="302" y2="43" stroke="var(--ink-faint)" marker-end="url(#rah)"/>
+    <line x1="418" y1="43" x2="448" y2="43" stroke="var(--ink-faint)" marker-end="url(#rah)"/>
+
+    <rect x="14" y="68" width="112" height="14" rx="2" fill="var(--bad-bg)" stroke="var(--bad)" stroke-width="0.7"/>
+    <rect x="14" y="68" width="258" height="14" rx="2" fill="none"/>
+    <rect x="160" y="68" width="112" height="14" rx="2" fill="var(--bad-bg)" stroke="var(--bad)" stroke-width="0.7"/>
+    <rect x="306" y="68" width="112" height="14" rx="2" fill="var(--bad-bg)" stroke="var(--bad)" stroke-width="0.7"/>
+    <rect x="452" y="68" width="112" height="14" rx="2" fill="var(--bad-bg)" stroke="var(--bad)" stroke-width="0.7"/>
+    <text x="14" y="98" fill="var(--ink-soft)" font-size="11">4 model calls &middot; every raw result stays in the transcript</text>
+
+    <line x1="14" y1="120" x2="626" y2="120" stroke="var(--rule)"/>
+
+    <text x="14" y="146" fill="var(--ink-soft)" font-size="11" font-weight="650">TASK-SHAPED</text>
+    <g font-family="var(--mono)" font-size="10.5">
+      <rect x="14" y="158" width="258" height="26" rx="3" fill="var(--bg-panel)" stroke="var(--accent)"/>
+      <text x="24" y="175" fill="var(--accent)">get_customer_context</text>
+    </g>
+    <rect x="14" y="192" width="112" height="14" rx="2" fill="var(--good-bg)" stroke="var(--good)" stroke-width="0.7"/>
+    <text x="140" y="203" fill="var(--ink-soft)" font-size="11">1 model call &middot; only the answer enters context</text>
+  </g>
+</svg>
+<figcaption>The filtering has to happen somewhere. Doing it in your tool costs one function
+call; doing it in the context window costs tokens on every subsequent turn of the run.</figcaption>
+</figure>
+
+<p>This is not an argument for one giant tool. The test is whether the grouping matches how
+the work is actually done: tools should
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"enable agents to
+subdivide and solve tasks in much the same way that a human would"</a>. If a human support
+agent would always pull orders and tickets together, that is one tool. If they would sometimes
+want only the billing history, that is a second.</p>
+
+<p>When you do have many tools, <strong>namespace them</strong> — <code>asana_search</code>,
+<code>jira_search</code>, or <code>asana_projects_search</code>, <code>asana_users_search</code>.
+Anthropic found that even the choice between prefix and suffix had
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"non-trivial effects
+on tool-use evaluations"</a>, which tells you how thin the margins are here.</p>
+
+<h2>2. Return what a colleague would read</h2>
+
+<p>The second half of the surface is the half people forget: <strong>what comes back</strong>.
+A tool result is text you are inserting into the model's context, and it competes for the same
+attention as everything else there.</p>
+
+<div class="pair">
+  <div>
+    <h4>Endpoint-shaped result</h4>
+<pre><code>{
+  "uuid": "7f3c9a1e-4b82-...",
+  "owner_uuid": "a91f-...",
+  "mime_type": "image/png",
+  "256px_image_url": "...",
+  "status_code": 3
+}</code></pre>
+  </div>
+  <div>
+    <h4>Agent-shaped result</h4>
+<pre><code>{
+  "name": "Q3 revenue deck",
+  "owner": "Priya Raman",
+  "file_type": "image",
+  "image_url": "...",
+  "status": "awaiting review"
+}</code></pre>
+  </div>
+</div>
+
+<p>The claim is stronger than "it reads nicer". Anthropic reports that
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">merely resolving
+arbitrary alphanumeric UUIDs into semantically meaningful language "significantly improves
+Claude's precision in retrieval tasks by reducing hallucinations"</a>. An opaque identifier is
+a token sequence with no meaning to reason over; a name is evidence. Keep the identifiers when
+a later tool call genuinely needs them — just stop making them the whole payload.</p>
+
+<p>That last tension has a clean solution worth stealing: give the tool a
+<code>response_format</code> parameter with <code>"concise"</code> and <code>"detailed"</code>
+values, and let the agent choose. In Anthropic's Slack example the detailed version of a
+thread cost 206 tokens against the concise version's 72 &mdash; roughly a third of the
+context for the same answer.</p>
+
+<h2>3. Put a ceiling on it, and say so</h2>
+
+<p>Any tool that can return a list can return ten thousand rows, and the model cannot defend
+itself against that. So the tool has to: Anthropic recommends
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"pagination, range
+selection, filtering, and/or truncation with sensible default parameter values"</a>, and notes
+that Claude Code caps tool responses at <strong>25,000 tokens by default</strong>.</p>
+
+<p>The part that separates a working surface from a merely safe one is what you say when you
+truncate. A silent cut produces a confident answer built on a third of the data. A cut that
+speaks does not:</p>
+
+<pre><code><span class="c"># Silent — the agent cannot tell this happened.</span>
+return rows[:50]
+
+<span class="hl"><span class="c"># Steering — states the limit, and names the cheaper strategy.</span></span>
+return (
+    f"Showing 50 of {total} matches. "
+    f"Narrow with date_from/date_to or a more specific query "
+    f"rather than requesting the full set."
+)</code></pre>
+
+<p>Anthropic's framing: when truncating, steer the agent toward
+<a href="https://www.anthropic.com/engineering/writing-tools-for-agents">"more token-efficient
+strategies, like making many small and targeted searches instead of a single, broad
+search."</a></p>
+
+<div class="note">
+  <span class="label">Deliberately not in this lesson</span>
+  <p>Error messages — what a tool says when it <em>fails</em> — are the other half of this and
+  are Lesson 04's entire subject. Today is about the happy path: the definition the model
+  reads, and the result it gets back when things work.</p>
+</div>
+
+<h2>The checklist</h2>
+
+<p>Five questions. They are the whole lesson, and they are what you run over any tool before
+it ships. The <a href="../reference/0003-tool-surface-checklist.html">reference card</a> has
+them with examples.</p>
+
+<ol>
+  <li><strong>Task or endpoint?</strong> Does this tool match a step a human would take, or a
+  row in your API docs?</li>
+  <li><strong>Could a new colleague use it from the description alone?</strong> Implicit
+  context made explicit, niche terms defined, relationships between resources spelled out.</li>
+  <li><strong>Is every parameter name unambiguous?</strong> <code>user_id</code>, not
+  <code>user</code>. The type does not say which one you meant; the name does.</li>
+  <li><strong>Is the result high-signal?</strong> Semantic names over identifiers, and a
+  verbosity control if both are genuinely wanted.</li>
+  <li><strong>What happens at ten thousand rows?</strong> A default limit, and a truncation
+  message that tells the agent what to do instead.</li>
+</ol>
+
+<h2>Audit one</h2>
+
+<p>Here is a tool from a real-shaped codebase. Three of the six criticisms below are real
+flaws; three are not. Commit to each before you click &mdash; guessing the non-flaws is the
+part that builds judgement.</p>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>Find the three real flaws.</p>
+<pre><code>{
+  "name": "search",
+  "description": "Searches the database and returns results.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {"type": "string"},
+      "user":  {"type": "string"},
+      "limit": {"type": "integer", "description": "Max rows. Optional."}
+    },
+    "required": ["query"]
+  }
+}</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="&ldquo;Searches the database&rdquo; tells the model nothing it could not guess from the name. Which database, holding what, searched how &mdash; none of it is answerable, so the model has to gamble on whether this tool is relevant at all. Description text is the highest-leverage field in the whole definition.">The description says nothing the name does not</button>
+      <button class="aopt" data-flaw
+        data-why="Is <code>user</code> an id, an email, a display name, or a handle? <code>&quot;type&quot;: &quot;string&quot;</code> accepts all four and the model will pick one. Anthropic's own example of this fix is exactly it: prefer <code>user_id</code> to <code>user</code>.">The user parameter could be four different things</button>
+      <button class="aopt" data-flaw
+        data-why="<code>limit</code> is optional with no stated default, so the model has no idea what it gets by omitting it &mdash; ten rows or ten thousand. Give it a documented default and a ceiling, and say in the description what happens when results exceed it.">Optional limit with no default and no ceiling</button>
+      <button class="aopt"
+        data-why="Two of three parameters being optional is normal and fine. Requiring more would make the tool harder to call, not easier &mdash; the flaw here is that the optional ones are <em>undescribed</em>, not that they are optional.">Only one of the three parameters is required</button>
+      <button class="aopt"
+        data-why="A flat object of scalars is exactly right. Nested schemas give the model more ways to produce a shape you did not expect; reach for one when the domain genuinely nests, not to look thorough.">The input schema is flat rather than nested</button>
+      <button class="aopt"
+        data-why="A bare name is only a problem once you have several tools that could collide &mdash; then prefixes such as <code>jira_search</code> earn their keep. In a four-tool agent, <code>search</code> is merely vague, and fixing the description fixes that.">The name is not namespaced with a prefix</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check</span>Your search tool can match 8,000 rows. Which
+  default behaviour is best?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Return 50 rows and say so plainly</button>
+    <button class="opt">Return every row the query matched</button>
+    <button class="opt">Return 50 rows and nothing further</button>
+    <button class="opt">Return an error asking for filters</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. The cap protects the context; the sentence protects the answer. Silent truncation is the dangerous option because the agent proceeds confidently on a slice it does not know is a slice &mdash; the same wrong-but-plausible failure you have already seen once."
+    data-when-wrong="A cap alone is not enough. Truncating silently gives the agent a slice it believes is the whole set, and it will answer confidently from it. Erroring out is too blunt &mdash; the agent often has no way to guess a narrower query. Cap the rows, then say how many of how many, and name the parameter that would narrow it.">
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: the five checklist questions, in any order. Then one sentence on why the
+tool <em>description</em> is the highest-leverage field in the definition.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="1.&#10;2.&#10;3.&#10;4.&#10;5.&#10;&#10;The description matters most because..."></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <ol>
+      <li>Task or endpoint?</li>
+      <li>Usable by a new colleague from the description alone?</li>
+      <li>Every parameter name unambiguous?</li>
+      <li>Result high-signal — names over identifiers?</li>
+      <li>What happens at ten thousand rows?</li>
+    </ol>
+    <p style="margin-bottom:0">And the description: it is the model's <em>only</em> basis for
+    deciding whether this tool is the right one for the step it is on. Wrong tool chosen is a
+    failure no amount of correct implementation recovers from.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<p>Same shape as last lesson: produce a number. You are given a deliberately endpoint-shaped
+tool surface over a small support dataset. You will measure it, redesign it, and measure
+again.</p>
+
+<div class="note win">
+  <span class="label">Your task, about 12 minutes</span>
+  <p>Everything is in <code>practice/03-tool-surface/</code>. Run with
+  <code>uv run python practice/03-tool-surface/&lt;file&gt;.py</code>.</p>
+  <ol>
+    <li><strong>Predict first.</strong> Open <code>naive_tools.py</code> and read the four tool
+    definitions and <code>data.json</code>. Before running: how many tool calls will the agent
+    need to answer <em>"Has Priya Raman had an order delayed, and is there an open ticket about
+    it?"</em> Write the guess in <code>NOTES.md</code>.</li>
+    <li>Run it. It prints the tool calls in order, plus API calls and token totals.</li>
+    <li>Write <code>good_tools.py</code>: the same question, the same loop, but
+    <strong>one</strong> tool you design yourself. Run the checklist over it before you run the
+    file. Semantic fields, no raw UUIDs in the result, a documented default limit.</li>
+    <li>Compare tool calls, API calls, and input tokens. Write both sets in
+    <code>NOTES.md</code>.</li>
+    <li><strong>Then find the cost.</strong> Ask both surfaces a question your consolidated
+    tool cannot answer but the endpoint-shaped one can. Write down what each did. Consolidation
+    buys tokens and spends flexibility, and you should be able to say what you spent.</li>
+  </ol>
+</div>
+
+<div class="note">
+  <span class="label">One confound to keep in mind</span>
+  <p>The practice files use <code>claude-haiku-4-5</code> for cost, as your Lesson 01 agent
+  does. The token arithmetic holds on any model, but <em>how well</em> a model copes with a bad
+  tool surface is model-dependent — a stronger model papers over more of it. If a result
+  surprises you, re-run that one on <code>claude-sonnet-5</code> before drawing a conclusion.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong>
+  <a href="https://www.anthropic.com/engineering/writing-tools-for-agents">Writing Effective
+  Tools for Agents</a> (Anthropic Engineering) &mdash; the source for everything above, and the
+  single most useful thing you can read this week. Roughly twenty minutes. Read to the end: the
+  final section, on generating evaluation tasks and letting Claude refactor your tools from the
+  transcripts, is where Lessons 03 and 08 meet.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="../reference/0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="0002-workflow-or-agent.html">Lesson 02: Workflow or Agent?</a>
+    <a href="0001-the-agent-loop.html">Lesson 01: The Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Tool results when things go wrong. An error message is the only
+  chance your harness gets to steer a confused agent, and most of them waste it.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring back the two numbers, and bring back
+    the question your consolidated tool could not answer &mdash; that trade-off is the
+    interview answer. Worth pushing on: "when is one big tool actually wrong?", "how do I know
+    my description is bad before it fails in production?", and "isn't this just writing good
+    APIs?" The last one has a sharper answer than it looks.
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>

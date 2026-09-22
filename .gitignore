@@ -1,0 +1,14 @@
+# Environment and secrets
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Editor / OS
+.DS_Store
+*.swp
+.impeccable/

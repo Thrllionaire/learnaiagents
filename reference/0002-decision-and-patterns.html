@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision Ladder &amp; Patterns</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Decision Ladder &amp; Pattern Catalogue</h1>
+  <p class="standfirst">Which shape the system should be, why, and the sentences that win
+  the argument. For the design review, not the tutorial.</p>
+  <p class="meta">
+    <span>Reference 02</span><span class="sep">&middot;</span>
+    <span>Architecture decision</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-20</span>
+  </p>
+</header>
+
+<h2>The definition that settles it</h2>
+
+<table>
+  <thead><tr><th>Term</th><th>Definition</th><th>Who picks the path</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Workflow</strong></td>
+      <td>LLMs and tools orchestrated through <em>predefined code paths</em></td>
+      <td>You, at design time</td>
+    </tr>
+    <tr>
+      <td><strong>Agent</strong></td>
+      <td>LLM <em>dynamically directs its own process and tool usage</em></td>
+      <td>The model, at run time</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Call count, tool count, and apparent sophistication are irrelevant to the classification.
+Only control-flow ownership matters.</p>
+
+<h2>The ladder</h2>
+
+<p>Ask in order. Stop at the first exit.</p>
+
+<table>
+  <thead><tr><th>#</th><th>Question</th><th>If no</th><th>If yes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Does any step need judgement no rule can express?</td>
+      <td><strong>Plain code.</strong> No LLM</td>
+      <td>Go to 2</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Can you draw the whole path before seeing the input?</td>
+      <td><strong>Agent</strong></td>
+      <td>Go to 3</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Does that path have more than one LLM step?</td>
+      <td><strong>Single call</strong></td>
+      <td><strong>Workflow</strong> — pick a pattern below</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note why">
+  <span class="label">Why the order matters</span>
+  <p>The ladder only reaches "agent" by <em>failing</em> to draw the path. It is never
+  reached by wanting one. Asking "is this agentic?" first inverts the bias and is how teams
+  end up shipping a loop where a <code>match</code> statement belonged.</p>
+</div>
+
+<h2>The five workflow patterns</h2>
+
+<table>
+  <thead><tr><th>Pattern</th><th>Use when</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Prompt chaining</strong><br><span class="tag">call → call → call</span></td>
+      <td>Task decomposes cleanly into fixed subtasks. Trading latency for accuracy</td>
+      <td>Write marketing copy, then translate it. Outline, then draft</td>
+    </tr>
+    <tr>
+      <td><strong>Routing</strong><br><span class="tag">classify → branch</span></td>
+      <td>Distinct categories are better handled separately <em>and</em> classification is accurate</td>
+      <td>Support query types to specialised prompts. Easy queries to a cheap model</td>
+    </tr>
+    <tr>
+      <td><strong>Parallelization</strong><br><span class="tag">fan out → aggregate</span></td>
+      <td><em>Sectioning:</em> independent subtasks, run for speed. <em>Voting:</em> same task N times, run for confidence</td>
+      <td>Sectioning: a guardrail screen alongside the main call. Voting: N reviewers flagging vulnerabilities</td>
+    </tr>
+    <tr>
+      <td><strong>Orchestrator&ndash;workers</strong><br><span class="tag">plan → fan out → merge</span></td>
+      <td>You cannot predict <em>which</em> subtasks are needed, but you fixed the fan-out-and-merge topology</td>
+      <td>A code change spanning an unknown set of files. Multi-source search</td>
+    </tr>
+    <tr>
+      <td><strong>Evaluator&ndash;optimizer</strong><br><span class="tag">generate ⇄ critique</span></td>
+      <td>Clear evaluation criteria <em>and</em> iterative refinement measurably helps</td>
+      <td>Literary translation with critique rounds. Multi-round search refinement</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="label">The boundary case, answered</span>
+  <p>Orchestrator&ndash;workers and evaluator&ndash;optimizer both give the model a real
+  decision, and get called agents in casual use. The distinction that holds up: <strong>you
+  fixed the topology</strong> — a fan-out and a merge, or a generate-critique cycle — and the
+  model only fills in the contents. In an agent the model picks the topology too. If someone
+  presses, that is the answer.</p>
+</div>
+
+<h2>What agency costs</h2>
+
+<table>
+  <thead><tr><th>Axis</th><th>Agent</th><th>Workflow</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Input tokens</td>
+      <td>Transcript re-sent each iteration → grows ~quadratically with run length</td>
+      <td>Each step pays only for its own prompt</td>
+    </tr>
+    <tr>
+      <td>Latency</td>
+      <td>Strictly sequential; step <em>n</em>+1 is unknown until <em>n</em> returns</td>
+      <td>Independent branches parallelize</td>
+    </tr>
+    <tr>
+      <td>Determinism</td>
+      <td>Same input may take a different path on a different day</td>
+      <td>Path is fixed; steps are individually testable</td>
+    </tr>
+    <tr>
+      <td>Errors</td>
+      <td>Compound — a wrong step becomes context for the next. 95% per step over 10 steps ≈ 60% end-to-end</td>
+      <td>Localised — you know which step failed</td>
+    </tr>
+    <tr>
+      <td>Debugging</td>
+      <td>Read a trace, reconstruct a path that will not recur</td>
+      <td>Re-run the failing step in isolation</td>
+    </tr>
+    <tr>
+      <td>Safety burden</td>
+      <td>Needs sandboxing, gating, iteration ceilings, review</td>
+      <td>Blast radius is whatever you wired up</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>The failure signature to recognise:</strong> an agentic system that goes wrong
+usually does not crash. It returns a confident, well-formed, partly-unfounded answer. Budget
+for detection, not for exception handling.</p>
+
+<h2>Common misclassifications</h2>
+
+<table>
+  <thead><tr><th>Sounds like an agent because…</th><th>But</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>"It makes five LLM calls"</td>
+      <td>Call count is not agency. Five calls you sequenced is a chain</td>
+    </tr>
+    <tr>
+      <td>"It uses tools"</td>
+      <td>A single call with retrieval is an augmented LLM, not an agent</td>
+    </tr>
+    <tr>
+      <td>"It runs over 5,000 documents"</td>
+      <td>A <code>for</code> loop over independent calls is batch processing</td>
+    </tr>
+    <tr>
+      <td>"It picks between three prompts"</td>
+      <td>That is routing. The model classifies; your code branches</td>
+    </tr>
+    <tr>
+      <td>"It retries until the output is good"</td>
+      <td>Evaluator&ndash;optimizer. You fixed the cycle; the model fills it</td>
+    </tr>
+    <tr>
+      <td>"It has a loop"</td>
+      <td>Only agentic if the <em>model</em> decides whether the loop continues</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Arguing it in the room</h2>
+
+<ol>
+  <li><strong>Concede capability, contest fit.</strong> "An agent can do this. Here is what
+  it costs versus the version we can test."</li>
+  <li><strong>Quantify one axis.</strong> Measure tokens or p95 on the real task. One
+  measured ratio beats any amount of opinion.</li>
+  <li><strong>Name the switch trigger.</strong> "Ship the router; if the fallback bucket
+  passes 15% of traffic, we escalate to an agent." Proposes an experiment instead of winning
+  a debate.</li>
+</ol>
+
+<div class="note win">
+  <span class="label">When the agent is right, say so plainly</span>
+  <p>Agents earn their cost on open-ended problems where the number of steps cannot be
+  predicted and no fixed path can be hardcoded. When that is genuinely true, a workflow
+  cannot do the job at any price, and the cost argument is irrelevant — do not hedge.</p>
+</div>
+
+<h2>Anthropic's three implementation principles</h2>
+
+<ol>
+  <li><strong>Simplicity.</strong> Maintain simplicity in the design.</li>
+  <li><strong>Transparency.</strong> Explicitly show the agent's planning steps.</li>
+  <li><strong>A crafted ACI.</strong> Design the agent&ndash;computer interface with the same
+  care as a human UI: thorough tool documentation and testing.</li>
+</ol>
+
+<p>Principle 3 is the whole of Lesson 03. The tool schema is the model's entire view of what
+it can do.</p>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic: Building Effective Agents</a> — definitions, all five patterns, the three principles</li>
+    <li><a href="https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf">OpenAI: A Practical Guide to Building Agents</a> — independent cross-check</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0002-workflow-or-agent.html">Lesson 02: Workflow or Agent?</a>
+    <a href="0001-agent-loop-reference.html">Reference: Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../resources.html">Resources</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

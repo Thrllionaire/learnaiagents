@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Loop Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Agent Loop Cheat Sheet</h1>
+  <p class="standfirst">The shapes, the invariants, and the current model IDs, for when you
+  are writing the loop and need the exact form rather than the explanation.</p>
+  <p class="meta">
+    <span>Reference 01</span><span class="sep">&middot;</span>
+    <span>Python + Anthropic SDK</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-19</span>
+  </p>
+</header>
+
+<h2>Skeleton</h2>
+
+<pre><code>messages = [{<span class='s'>"role"</span>: <span class='s'>"user"</span>, <span class='s'>"content"</span>: user_input}]
+
+<span class='k'>while True</span>:
+    response = client.messages.create(
+        model=<span class='s'>"claude-opus-5"</span>, max_tokens=<span class='s'>16000</span>,
+        tools=TOOL_SCHEMAS, messages=messages,
+    )
+    <span class='k'>if</span> response.stop_reason != <span class='s'>"tool_use"</span>:
+        <span class='k'>break</span>
+    messages.append({<span class='s'>"role"</span>: <span class='s'>"assistant"</span>, <span class='s'>"content"</span>: response.content})
+    messages.append({<span class='s'>"role"</span>: <span class='s'>"user"</span>, <span class='s'>"content"</span>: [
+        {<span class='s'>"type"</span>: <span class='s'>"tool_result"</span>, <span class='s'>"tool_use_id"</span>: b.id,
+         <span class='s'>"content"</span>: TOOLS[b.name](**b.input)}
+        <span class='k'>for</span> b <span class='k'>in</span> response.content <span class='k'>if</span> b.type == <span class='s'>"tool_use"</span>
+    ]})</code></pre>
+
+<h2>Block shapes</h2>
+
+<table>
+  <thead><tr><th>Direction</th><th>Shape</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Tool schema</strong><br>you → API</td>
+      <td><code>{"name", "description", "input_schema": {"type": "object", "properties", "required"}}</code></td>
+    </tr>
+    <tr>
+      <td><strong>tool_use</strong><br>API → you</td>
+      <td><code>block.type == "tool_use"</code>, with <code>.id</code>, <code>.name</code>, <code>.input</code> (a dict)</td>
+    </tr>
+    <tr>
+      <td><strong>tool_result</strong><br>you → API</td>
+      <td><code>{"type": "tool_result", "tool_use_id", "content", "is_error"?}</code> — nested in a <code>user</code> message</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2><code>stop_reason</code> values</h2>
+
+<table>
+  <thead><tr><th>Value</th><th>Meaning</th><th>Loop action</th></tr></thead>
+  <tbody>
+    <tr><td><code>"tool_use"</code></td><td>Model is requesting one or more tools</td><td><strong>Continue</strong>: dispatch and feed back</td></tr>
+    <tr><td><code>"end_turn"</code></td><td>Model is finished</td><td><strong>Break</strong>: read the text block</td></tr>
+    <tr><td><code>"max_tokens"</code></td><td>Hit the output cap mid-generation</td><td>Break; output is truncated. Raise <code>max_tokens</code></td></tr>
+    <tr><td><code>"pause_turn"</code></td><td>A <em>server</em>-side tool hit its iteration limit</td><td>Re-send with the assistant turn appended to continue</td></tr>
+    <tr><td><code>"refusal"</code></td><td>A safety classifier declined</td><td>Break. Check <code>response.stop_details</code>, populated <em>only</em> here</td></tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">Guard before reading</span>
+  <p>Check <code>stop_reason</code> <em>before</em> touching <code>response.content</code>.
+  A refusal returns HTTP 200 with a <code>stop_reason</code> of <code>"refusal"</code>, not
+  an exception. Code that assumes a text block is present will throw on the
+  <code>next()</code>.</p>
+</div>
+
+<h2>Roles: provenance, not semantics</h2>
+
+<p>The Messages API has two conversational roles. A role records <strong>who generated the
+tokens</strong>, not what kind of content it is. Content type lives on the block.</p>
+
+<table>
+  <thead><tr><th>Role</th><th>Holds</th><th>Trust</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>assistant</code></td>
+      <td>Only what the model itself generated: <code>text</code>, <code>tool_use</code>, <code>thinking</code></td>
+      <td>n/a (its own output)</td>
+    </tr>
+    <tr>
+      <td><code>user</code></td>
+      <td>Everything from outside the model: the human's text <em>and</em> <code>tool_result</code> blocks</td>
+      <td>Untrusted</td>
+    </tr>
+    <tr>
+      <td><code>system</code><br>(top-level)</td>
+      <td>Operator instructions, fixed before the run</td>
+      <td>Trusted</td>
+    </tr>
+    <tr>
+      <td><code>system</code><br>(in <code>messages[]</code>)</td>
+      <td>Operator instructions added mid-run. Not on Sonnet 5; no beta header</td>
+      <td>Trusted &mdash; the injection-safe operator channel</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>There is no <code>tool</code> role. A tool result was produced by your harness, not the
+model, so it is user-role content carrying a <code>tool_result</code> block. The model is not
+confused about what it is: the block type and the <code>tool_use_id</code> identify it. The
+role governs turn-taking; the block type governs meaning.</p>
+
+<div class="note trap">
+  <span class="label">The security consequence</span>
+  <p>Tool results land in the <strong>same trust channel as user input</strong>. Text fetched
+  from a web page, a database row, or a file arrives at user-level trust and sits below the
+  system prompt. This is the primary prompt-injection vector in agents, and it falls straight
+  out of the role model. Treat every <code>tool_result</code> as hostile input.</p>
+</div>
+
+<p><em>Contrast:</em> OpenAI's API has a <code>tool</code> role with a
+<code>tool_call_id</code>. Functionally near-identical (both bind results to requests by ID),
+but the separate role implies tool output is its own trust tier. It is not.</p>
+
+<h2>Invariants: break these and it fails</h2>
+
+<ol>
+  <li>Append <code>response.content</code> <strong>verbatim</strong>. Never
+  <code>response.text</code>, never a reconstructed list.</li>
+  <li>Every <code>tool_result</code> carries the <code>tool_use_id</code> of the block that
+  requested it.</li>
+  <li>All results from <strong>one</strong> assistant turn go in <strong>one</strong> user
+  message. Splitting them suppresses parallel tool calling.</li>
+  <li>A failed tool still returns a <code>tool_result</code>, with
+  <code>"is_error": True</code>. Never silently drop one; the ids must balance.</li>
+  <li>The transcript is re-sent <strong>in full</strong> every iteration. Cost grows with the
+  square of run length.</li>
+  <li>Continue on <code>"tool_use"</code> only. Treat every other
+  <code>stop_reason</code> as an exit.</li>
+</ol>
+
+<h2>Current model IDs</h2>
+
+<div class="note why">
+  <span class="label">These drift; re-verify before trusting</span>
+  <p>Model IDs are the single most common source of stale code in this field. Never append a
+  date suffix; the IDs below are complete as written.</p>
+</div>
+
+<table>
+  <thead><tr><th>Model</th><th>ID</th><th>Context</th><th>In / Out per 1M</th></tr></thead>
+  <tbody>
+    <tr><td>Claude Opus 5</td><td><code>claude-opus-5</code></td><td>1M</td><td>$5 / $25</td></tr>
+    <tr><td>Claude Sonnet 5</td><td><code>claude-sonnet-5</code></td><td>1M</td><td>$2 / $10</td></tr>
+    <tr><td>Claude Haiku 4.5</td><td><code>claude-haiku-4-5</code></td><td>200K</td><td>$1 / $5</td></tr>
+  </tbody>
+</table>
+
+<h2>Dead patterns</h2>
+
+<p>These appear throughout older tutorials and blog posts, and in code generated by models
+with an older prior. On current models they are wrong, and most return a 400.</p>
+
+<table>
+  <thead><tr><th>Stale</th><th>Current</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>thinking={"type": "enabled", "budget_tokens": N}</code></td>
+      <td><code>thinking={"type": "adaptive"}</code>; <code>budget_tokens</code> is rejected with a 400</td>
+    </tr>
+    <tr>
+      <td>Tuning a thinking token budget</td>
+      <td><code>output_config={"effort": "low"|"medium"|"high"|"xhigh"|"max"}</code></td>
+    </tr>
+    <tr>
+      <td>Assistant prefill to force a format</td>
+      <td>Removed (400). Use <code>output_config={"format": {...}}</code></td>
+    </tr>
+    <tr>
+      <td><code>output_format=...</code></td>
+      <td><code>output_config={"format": {...}}</code></td>
+    </tr>
+    <tr>
+      <td>Date-suffixed IDs (<code>claude-opus-5-20260401</code>)</td>
+      <td>Bare IDs only</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Production add-ons the teaching loop omits</h2>
+
+<table>
+  <thead><tr><th>Add</th><th>Why</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr><td>Iteration ceiling</td><td>A looping agent spends money forever</td><td>01</td></tr>
+    <tr><td><code>thinking={"type": "adaptive"}</code></td><td>Better tool selection on non-trivial tasks</td><td>—</td></tr>
+    <tr><td>Streaming + <code>.get_final_message()</code></td><td>Long turns otherwise hit HTTP timeouts</td><td>—</td></tr>
+    <tr><td>Prompt caching breakpoints</td><td>The re-sent transcript is mostly stable prefix</td><td>05</td></tr>
+    <tr><td>Argument validation before dispatch</td><td><code>**block.input</code> is model-controlled input</td><td>07</td></tr>
+    <tr><td>Per-tool permission gating</td><td>Irreversible actions need a human</td><td>07</td></tr>
+    <tr><td>Structured trace logging</td><td>You cannot eval what you did not record</td><td>08</td></tr>
+  </tbody>
+</table>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic: Building Effective Agents</a></li>
+    <li><a href="https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview">Claude API: Tool Use overview</a></li>
+    <li><a href="https://github.com/anthropics/anthropic-sdk-python">anthropic-sdk-python</a></li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0001-the-agent-loop.html">Lesson 01: The Agent Loop</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../resources.html">Resources</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

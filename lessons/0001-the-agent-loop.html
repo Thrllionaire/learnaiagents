@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Agent Loop</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>The Agent Loop</h1>
+  <p class="standfirst">An agent is not a model. It is a loop you own, and once you can
+  write it from memory, every framework you meet becomes readable.</p>
+  <p class="meta">
+    <span>Lesson 01</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<p class="lead">You have called an LLM API. You send messages, you get text back, the call
+ends. That is a <em class="term">function</em>. This lesson turns it into an
+<em class="term">agent</em> by adding the one thing it lacks: the ability to act, see what
+happened, and decide what to do next.</p>
+
+<p>The gap is smaller than the discourse suggests. Anthropic's own framing is blunt about
+it. Agents are <a href="https://www.anthropic.com/engineering/building-effective-agents">"just
+LLMs using tools based on environmental feedback in a loop."</a> Everything else you will
+learn in this course (tools, memory, guardrails, evals) hangs off the skeleton you build
+in the next twenty minutes.</p>
+
+<h2>The four moving parts</h2>
+
+<p>An agent loop has exactly four. Nothing in a production agent is a fifth thing; it is one
+of these four, elaborated.</p>
+
+<table>
+  <thead>
+    <tr><th>Part</th><th>What it is</th><th>Who owns it</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>The transcript</strong></td>
+      <td>A growing <code>messages</code> list, re-sent in full on every iteration</td>
+      <td>You</td>
+    </tr>
+    <tr>
+      <td><strong>The tool schemas</strong></td>
+      <td>Named, typed capabilities the model may <em>request</em></td>
+      <td>You</td>
+    </tr>
+    <tr>
+      <td><strong>The branch</strong></td>
+      <td><code>stop_reason</code>: continue looping, or stop</td>
+      <td>The model decides, you obey</td>
+    </tr>
+    <tr>
+      <td><strong>The dispatch</strong></td>
+      <td>Running the requested tool and feeding the result back</td>
+      <td>You</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note why">
+  <span class="label">The idea worth keeping</span>
+  <p>The model never runs anything. It emits a <em>request</em>, a <code>tool_use</code>
+  block, and then stops generating and waits. Your code, the
+  <em class="term">harness</em>, decides whether that request actually happens.</p>
+  <p>This is not a technicality. It is the entire basis of agent security, permissioning,
+  and human-in-the-loop approval, which we cover in later lessons. The model proposes;
+  the harness disposes.</p>
+</div>
+
+<h2>Watch one run</h2>
+
+<p>Step through a complete two-turn run below. Watch the <code>messages</code> list on the
+left grow. That growth <em>is</em> the agent's memory within a run. New entries are marked
+in rust.</p>
+
+<div class="trace" data-trace>
+  <div class="trace-stage" data-stage></div>
+  <div class="trace-bar">
+    <button data-prev>&larr; Back</button>
+    <span data-counter></span>
+    <button data-next>Step &rarr;</button>
+  </div>
+  <script type="application/json" data-frames>
+[
+  {
+    "caption": "<strong>Iteration 1: send.</strong> The transcript holds one message. You send it, along with the tool schemas, to the API.",
+    "html": "<div class='state-row is-new'><span class='role'>user</span><span>\"What's the weather in Paris — should I pack a coat?\"</span></div><pre><code>client.messages.create(\n    model=<span class='s'>\"claude-opus-5\"</span>,\n    tools=[get_weather],\n    messages=messages,   <span class='c'># 1 message</span>\n)</code></pre>"
+  },
+  {
+    "caption": "<strong>Iteration 1: response.</strong> The model does not answer. It stops and asks for the tool. <code>stop_reason</code> is <code>\"tool_use\"</code>, so the loop must continue.",
+    "html": "<div class='state-row'><span class='role'>user</span><span>\"What's the weather in Paris — should I pack a coat?\"</span></div><pre><code>response.stop_reason  <span class='c'># → \"tool_use\"</span>\nresponse.content      <span class='c'># → [ToolUseBlock(</span>\n                      <span class='c'>#      id=\"toolu_01A\",</span>\n                      <span class='c'>#      name=\"get_weather\",</span>\n                      <span class='c'>#      input={\"location\": \"Paris\"})]</span></code></pre>"
+  },
+  {
+    "caption": "<strong>Append the assistant turn, verbatim.</strong> You push <code>response.content</code> itself onto the transcript, not a string extracted from it. The <code>tool_use</code> block must survive, because the result you send next has to bind to its <code>id</code>.",
+    "html": "<div class='state-row'><span class='role'>user</span><span>\"What's the weather in Paris — should I pack a coat?\"</span></div><div class='state-row is-new'><span class='role'>assistant</span><span>[tool_use id=toolu_01A name=get_weather input={location: \"Paris\"}]</span></div>"
+  },
+  {
+    "caption": "<strong>Dispatch.</strong> Your harness, not the model, runs the function. This is the point where a real agent would check permissions, validate arguments, or stop and ask a human.",
+    "html": "<pre><code><span class='k'>for</span> block <span class='k'>in</span> response.content:\n    <span class='k'>if</span> block.type == <span class='s'>\"tool_use\"</span>:\n        result = TOOLS[block.name](**block.input)\n        <span class='c'># → \"8°C, light rain, wind 20km/h\"</span></code></pre><div class='state-row is-new'><span class='role'>harness</span><span>get_weather(location=\"Paris\") → \"8°C, light rain, wind 20km/h\"</span></div>"
+  },
+  {
+    "caption": "<strong>Feed the result back as a <code>user</code> message.</strong> This surprises people. The tool result is not an assistant message and not a system message; in the Messages API it rides in the <code>user</code> role, carrying the <code>tool_use_id</code> that binds it to the request.",
+    "html": "<div class='state-row'><span class='role'>user</span><span>\"What's the weather in Paris — should I pack a coat?\"</span></div><div class='state-row'><span class='role'>assistant</span><span>[tool_use id=toolu_01A …]</span></div><div class='state-row is-new'><span class='role'>user</span><span>[tool_result tool_use_id=toolu_01A content=\"8°C, light rain, wind 20km/h\"]</span></div>"
+  },
+  {
+    "caption": "<strong>Iteration 2: send the whole thing again.</strong> Not the delta. The entire transcript goes back over the wire every single iteration. The model is stateless; the transcript is the state.",
+    "html": "<pre><code>client.messages.create(\n    model=<span class='s'>\"claude-opus-5\"</span>,\n    tools=[get_weather],\n    messages=messages,   <span class='c'># now 3 messages</span>\n)</code></pre><div class='note'><span class='label'>Consequence</span>A ten-step agent run is ten API calls, each one longer than the last. Cost grows roughly quadratically with run length. This is why context management is a whole lesson later.</div>"
+  },
+  {
+    "caption": "<strong>Iteration 2: response.</strong> Now the model has what it needed. It answers in text and sets <code>stop_reason</code> to <code>\"end_turn\"</code>. Your loop breaks. The run is over: two API calls, one tool execution.",
+    "html": "<pre><code>response.stop_reason  <span class='c'># → \"end_turn\"</span>\nresponse.content      <span class='c'># → [TextBlock(text=\"Yes — pack a coat.</span>\n                      <span class='c'>#      Paris is 8°C with light rain…\")]</span></code></pre><div class='state-row is-new'><span class='role'>assistant</span><span>\"Yes — pack a coat. Paris is 8°C with light rain and 20km/h wind.\"</span></div>"
+  }
+]
+  </script>
+</div>
+
+<h2>The loop, in full</h2>
+
+<p>Here is the whole thing. Forty lines, no framework, no abstraction. Read the
+<code>stop_reason</code> branch first. It is the spine; everything else is plumbing.</p>
+
+<pre><code><span class='k'>import</span> anthropic
+
+client = anthropic.Anthropic()
+
+<span class='c'># 1. THE TOOL SCHEMAS — what the model is allowed to ask for.</span>
+<span class='c'>#    The description is prompt, not documentation. The model reads it.</span>
+TOOL_SCHEMAS = [{
+    <span class='s'>"name"</span>: <span class='s'>"get_weather"</span>,
+    <span class='s'>"description"</span>: <span class='s'>"Get current weather for a city. Returns temperature, "</span>
+                   <span class='s'>"conditions, and wind speed."</span>,
+    <span class='s'>"input_schema"</span>: {
+        <span class='s'>"type"</span>: <span class='s'>"object"</span>,
+        <span class='s'>"properties"</span>: {
+            <span class='s'>"location"</span>: {<span class='s'>"type"</span>: <span class='s'>"string"</span>,
+                         <span class='s'>"description"</span>: <span class='s'>"City name, e.g. Paris"</span>},
+        },
+        <span class='s'>"required"</span>: [<span class='s'>"location"</span>],
+    },
+}]
+
+<span class='c'># 2. THE DISPATCH TABLE — your side of the contract.</span>
+<span class='k'>def</span> get_weather(location: str) -> str:
+    <span class='k'>return</span> <span class='s'>f"8°C, light rain, wind 20km/h in {location}"</span>
+
+TOOLS = {<span class='s'>"get_weather"</span>: get_weather}
+
+
+<span class='k'>def</span> run_agent(user_input: str) -> str:
+    <span class='c'># 3. THE TRANSCRIPT — the agent's entire within-run memory.</span>
+    messages = [{<span class='s'>"role"</span>: <span class='s'>"user"</span>, <span class='s'>"content"</span>: user_input}]
+
+    <span class='k'>while True</span>:
+        response = client.messages.create(
+            model=<span class='s'>"claude-opus-5"</span>,
+            max_tokens=<span class='s'>16000</span>,
+            tools=TOOL_SCHEMAS,
+            messages=messages,
+        )
+
+        <span class='c'># 4. THE BRANCH — the model decides whether the loop continues.</span>
+        <span class='k'>if</span> response.stop_reason != <span class='s'>"tool_use"</span>:
+            <span class='k'>break</span>
+
+        <span class='c'># Append the assistant turn VERBATIM — tool_use blocks intact.</span>
+        messages.append({<span class='s'>"role"</span>: <span class='s'>"assistant"</span>, <span class='s'>"content"</span>: response.content})
+
+        <span class='c'># Execute every requested tool. Claude may request several at once;</span>
+        <span class='c'># all their results must come back in ONE user message.</span>
+        results = []
+        <span class='k'>for</span> block <span class='k'>in</span> response.content:
+            <span class='k'>if</span> block.type == <span class='s'>"tool_use"</span>:
+                <span class='k'>try</span>:
+                    output = TOOLS[block.name](**block.input)
+                    results.append({<span class='s'>"type"</span>: <span class='s'>"tool_result"</span>,
+                                    <span class='s'>"tool_use_id"</span>: block.id,
+                                    <span class='s'>"content"</span>: output})
+                <span class='k'>except</span> Exception <span class='k'>as</span> e:
+                    <span class='c'># Errors go BACK to the model, not up the stack.</span>
+                    results.append({<span class='s'>"type"</span>: <span class='s'>"tool_result"</span>,
+                                    <span class='s'>"tool_use_id"</span>: block.id,
+                                    <span class='s'>"content"</span>: <span class='s'>f"Error: {e}"</span>,
+                                    <span class='s'>"is_error"</span>: <span class='k'>True</span>})
+
+        messages.append({<span class='s'>"role"</span>: <span class='s'>"user"</span>, <span class='s'>"content"</span>: results})
+
+    <span class='k'>return</span> next(b.text <span class='k'>for</span> b <span class='k'>in</span> response.content <span class='k'>if</span> b.type == <span class='s'>"text"</span>)</code></pre>
+
+<div class="note">
+  <span class="label">On that last <code>except</code></span>
+  <p>Catching the exception and handing the message back to the model is not sloppiness.
+  It is the design. A tool failure is <em>information the agent can act on</em>: retry with
+  different arguments, try another route, or tell the user it cannot be done. Raising
+  instead would kill a run that the model could have recovered. Lesson 04 is entirely about
+  writing error messages an agent can actually use.</p>
+</div>
+
+<h2>Three traps</h2>
+
+<p>These are the three that cost people an afternoon each. They are worth more to you as
+recognised shapes than as memorised rules.</p>
+
+<div class="note trap">
+  <span class="label">Trap 1: appending text instead of content</span>
+  <p><code>messages.append({"role": "assistant", "content": response.text})</code></p>
+  <p>Extracting the text throws away the <code>tool_use</code> block. The
+  <code>tool_result</code> you send next references a <code>tool_use_id</code> that no longer
+  exists in the transcript, and the API rejects the request. Always append
+  <code>response.content</code>, the list, unchanged.</p>
+</div>
+
+<div class="note trap">
+  <span class="label">Trap 2: splitting parallel tool results</span>
+  <p>Claude can request several tools in one response. If you append each
+  <code>tool_result</code> as its own <code>user</code> message, the API may tolerate it,
+  but you have quietly taught the model to stop making parallel calls, and your agent gets
+  slower for reasons that never show up in a stack trace. All results from one assistant
+  turn go in <strong>one</strong> user message.</p>
+</div>
+
+<div class="note trap">
+  <span class="label">Trap 3: <code>while True</code> with no ceiling</span>
+  <p>The loop above is honest teaching code and unfit for production. A model that
+  misreads a tool result can call the same tool forever, and each iteration costs money.
+  Every real agent has a maximum-iteration guard. Add one before you ship anything.</p>
+</div>
+
+<h2>Check yourself</h2>
+
+<p>Answer before scrolling. Getting one wrong here is worth more than getting all three
+right. The miss is what makes it stick.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check 1 of 3</span>Your tool has run and produced output.
+  How does that output re-enter the transcript?</p>
+  <div class="opts">
+    <button class="opt" data-correct>Append a user message that holds tool_result blocks</button>
+    <button class="opt">Append a system message that holds tool_result blocks</button>
+    <button class="opt">Append an assistant message with the tool_result blocks</button>
+    <button class="opt">Append a user message that holds plain output text</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Tool results ride in the <code>user</code> role. This is the Messages API convention and it catches almost everyone once. The mental shortcut: the <em>assistant</em> role is whatever the model generated; everything fed in from the outside world, including tool output, is <em>user</em>."
+    data-when-wrong="It is the <code>user</code> role. The assistant role holds only what the model itself generated, so the tool_use request lives there; the result comes from your harness, i.e. from outside the model, and so rides as user content with a <code>tool_use_id</code> binding it to the request.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check 2 of 3</span>An engineer writes
+  <code>messages.append({"role": "assistant", "content": response.text})</code>
+  inside the loop. What breaks?</p>
+  <div class="opts">
+    <button class="opt" data-correct>The tool_use blocks are dropped, so tool_result ids dangle</button>
+    <button class="opt">The thinking blocks are dropped, so reasoning context dies</button>
+    <button class="opt">Nothing breaks yet, but the token cost climbs badly</button>
+    <button class="opt">The max_tokens cap is hit, so the output truncates</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Exactly, and note <em>why</em> it is a sharp failure rather than a soft one. The <code>tool_result</code> you append next carries a <code>tool_use_id</code>, and the API validates that it matches a <code>tool_use</code> block still present in the transcript. Drop the block and the next request is rejected."
+    data-when-wrong="The <code>tool_use</code> blocks are lost. <code>response.content</code> is a <em>list of blocks</em> (text, tool_use, thinking) and <code>.text</code> keeps only one kind. The next <code>tool_result</code> then references a <code>tool_use_id</code> that is no longer in the transcript, and the API rejects it.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check 3 of 3</span>In the loop as written, what actually
+  ends the run?</p>
+  <div class="opts">
+    <button class="opt" data-correct>The model returns stop_reason end_turn, requesting no tools</button>
+    <button class="opt">Your code counts iterations and breaks at ten</button>
+    <button class="opt">The tool returns a value marked as final</button>
+    <button class="opt">The messages list exceeds the model's context window</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right, and sit with the implication, because it is the one interviewers probe. <strong>The model controls termination.</strong> That is precisely what makes this an agent rather than a workflow: you did not encode the number of steps, the model chose it. It is also why an iteration ceiling is not optional in production. You are otherwise trusting the model to decide when to stop spending your money."
+    data-when-wrong="It is <code>stop_reason == \"end_turn\"</code>, the model deciding it needs no more tools. This is the defining property of an agent: the model, not your code, chooses the control flow and therefore the step count. An iteration ceiling is something you add on top as a safety net, not the normal exit.">
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Close the tab in your head. Without scrolling up, write the loop's control flow, not
+the full code, just the sequence of decisions and appends.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="1. messages = [...]&#10;2. while True:&#10;3.   ..."></textarea>
+  <details>
+    <summary>Reveal the answer once you have written something</summary>
+    <ol>
+      <li><code>messages = [user input]</code></li>
+      <li><strong>Loop:</strong> send the <em>whole</em> transcript + tool schemas</li>
+      <li>If <code>stop_reason != "tool_use"</code> → <strong>break</strong></li>
+      <li>Append <code>response.content</code> verbatim as the <code>assistant</code> turn</li>
+      <li>Run every requested tool; collect all results</li>
+      <li>Append them as <strong>one</strong> <code>user</code> message of <code>tool_result</code> blocks</li>
+      <li>Repeat</li>
+    </ol>
+    <p style="margin-bottom:0">If you got the order right but missed "verbatim" or "one
+    message", that is the useful gap. Those are traps 1 and 2.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 10 minutes</span>
+  <p>Type the loop out yourself. Not copy-paste: typing it is part of the exercise.</p>
+  <ol>
+    <li><code>pip install anthropic</code>, and set <code>ANTHROPIC_API_KEY</code>.</li>
+    <li>Write the loop above with <strong>two</strong> tools instead of one. Add a
+    <code>get_time(timezone)</code> alongside <code>get_weather</code>. Fake both; returning
+    a hardcoded string is fine. The tools are not the point.</li>
+    <li>Add a <code>print()</code> at the top of each iteration showing the iteration number
+    and <code>response.stop_reason</code>. <em>Watch the loop turn.</em></li>
+    <li>Ask it something that needs both tools at once: <em>"What's the weather in Tokyo and
+    what time is it there?"</em> Note whether Claude requests them in one response or two.</li>
+    <li>Now break it on purpose: change the append to <code>response.text</code>
+    and read the error. Seeing trap 1 fire is worth more than being warned about it.</li>
+  </ol>
+</div>
+
+<div class="note">
+  <span class="label">Worth knowing, deliberately skipped</span>
+  <p>The Python SDK ships <code>client.beta.messages.tool_runner()</code>, which writes this
+  loop for you from decorated functions. It is the right choice for production. You are
+  learning the manual loop first on purpose: your mission is to be the person who can
+  <em>debug</em> the abstraction, and that means having built the thing underneath it once.
+  We will come back to the runner.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong>
+  <a href="https://www.anthropic.com/engineering/building-effective-agents">Building Effective
+  Agents</a> (Anthropic Engineering). Read the opening sections through "The augmented LLM"
+  (roughly ten minutes). It is the highest-trust text on this subject and the shared
+  vocabulary of the field; people will assume you have read it. Save the five workflow
+  patterns for Lesson 02, which is built on them.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0001-agent-loop-reference.html">Reference: Agent Loop Cheat Sheet</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../resources.html">Resources</a>
+    <a href="../mission.html">Mission</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Workflow or agent? The decision, the five patterns, and
+  when the right answer is to build neither.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> If anything here was unclear, or if
+    the build task threw an error you did not expect, ask. Paste the traceback. Push back on
+    anything that sounded like hand-waving. "Why does the tool result go in the user role?"
+    is a good question and it has a real answer.
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/trace.js"></script>
+</body>
+</html>
