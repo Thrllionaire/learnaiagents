@@ -4,6 +4,33 @@ This course is a static HTML site published with GitHub Pages, from the `master`
 branch root of `github.com/Thrllionaire/learnaiagents`. Live at:
 https://thrllionaire.github.io/learnaiagents/
 
+## Two repos, one workspace
+
+`/home/naren/dev/learnaiagents` holds two independent git repos:
+
+- The **outer repo** (this directory, public) — tracks the published site:
+  `lessons/`, `reference/`, `assets/`, `index.html`, `mission.html`,
+  `resources.html`, `glossary.html`, `MISSION.md`, `RESOURCES.md`,
+  `GLOSSARY.md`, `PUBLISHING.md`.
+- The **inner repo**, rooted at `learning-records/` (private:
+  `github.com/Thrllionaire/learnaiagents-progress`) — tracks `learning-records/*.md`
+  and `practice/` (moved inside `learning-records/practice`, with a `practice`
+  symlink at the workspace root so paths like `./practice/` still resolve).
+  `NOTES.md` is untracked in both.
+
+The outer repo's `.gitignore` excludes `/learning-records/`, `/practice`, and
+`NOTES.md`, so `git add`/`git status` in this directory never touches the private
+repo. This split only matters for git — the `/teach` skill reads/writes plain
+filesystem paths and has no idea two repos are involved, so lesson generation
+works the same as before.
+
+To commit progress (learning records, practice code):
+
+```bash
+cd /home/naren/dev/learnaiagents/learning-records
+git add -A && git commit -m "..." && git push
+```
+
 There is no build step — the HTML in `lessons/` and `reference/` is committed as-is
 and served directly. The only "generation" step is converting the three root
 markdown files (`MISSION.md`, `RESOURCES.md`, `GLOSSARY.md`) to HTML, which only
@@ -78,8 +105,9 @@ git commit -m "Add lesson NNNN: <title>"
 git push
 ```
 
-Only add `practice/`, `learning-records/`, and `NOTES.md` if you're fine with them
-being visible in the (public) repo — they aren't linked from the site either way.
+Don't `git add` `practice/`, `learning-records/`, or `NOTES.md` from this directory —
+they're gitignored here and belong to the private progress repo instead (see
+above).
 
 GitHub Pages rebuilds automatically on push, usually within 1-2 minutes. Check
 build status with:
@@ -113,7 +141,11 @@ sleep 15 && gh api repos/Thrllionaire/learnaiagents/pages/builds/latest
 
 - `git init`, `gh repo create learnaiagents --public --source=. --remote=origin --push`
 - `.nojekyll` added at repo root so GitHub Pages serves the HTML as-is instead of
-  running it through Jekyll (which would otherwise try to process the loose
-  markdown/Python files in `practice/` and `learning-records/`).
+  running it through Jekyll.
 - Pages enabled via `gh api -X POST repos/Thrllionaire/learnaiagents/pages
   -f "source[branch]=master" -f "source[path]=/"`.
+- Progress tracking split into a private repo: `practice/` moved into
+  `learning-records/practice/`, a `practice` symlink added back at the workspace
+  root, `learning-records/`, `practice`, and `NOTES.md` added to the outer
+  `.gitignore`, then `git init` + `gh repo create learnaiagents-progress --private
+  --source=. --remote=origin --push` run from inside `learning-records/`.
