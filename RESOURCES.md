@@ -31,11 +31,22 @@ parametric memory. Communities are where wisdom gets tested.
   structurally rather than writing better messages about them.
 - [anthropic-sdk-python on GitHub](https://github.com/anthropics/anthropic-sdk-python)
   Source of truth for SDK surface — the tool runner, streaming, types. Use for: when docs and memory disagree.
+- [Claude Platform Docs: Memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool)
+  The client-side memory tool: `/memories` files, the six commands (view, create, str_replace,
+  insert, delete, rename) with exact success/error strings, path-traversal security
+  requirements, and the multisession pattern for projects spanning sessions. Use for: cross-session
+  state — the mechanism behind Lesson 05's "structured note-taking."
 
 ### Primary — evaluation
 - [Hamel Husain: Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
   Error analysis first, then tests. The three-level framework, and the rule that an LLM judge is
   worthless until you have measured its agreement with a human. Use for: everything eval-related.
+- [Chroma: Context Rot](https://research.trychroma.com/context-rot)
+  The study behind the "context rot" claim in the context engineering post — 18 LLMs, ~194k
+  calls, needle-in-a-haystack variants (needle-question similarity, distractor count, haystack
+  structure) plus a repeated-words task, scored by a calibrated LLM judge or Levenshtein
+  distance. Use for: how to actually *measure* recall degradation as context grows, not just
+  token count — the methodology to scale down for your own agent's eval set.
 
 ### Secondary — perspective
 - [OpenAI: A Practical Guide to Building Agents](https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf)

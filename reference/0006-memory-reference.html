@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Tool Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Memory Tool Reference</h1>
+  <p class="standfirst">The command set, the error strings, and the security checklist for a
+  client-side memory handler. Print it and keep it next to the tool surface card.</p>
+  <p class="meta">
+    <span>Reference 06</span><span class="sep">&middot;</span>
+    <span>Memory &amp; cross-session state</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-22</span>
+  </p>
+</header>
+
+<h2>Within-session vs. cross-session</h2>
+
+<table>
+  <thead><tr><th></th><th>Lives in</th><th>Dies when&hellip;</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Within-session</strong><br><code>messages</code></td>
+      <td>RAM, inside one process</td>
+      <td>The process exits &mdash; compaction and trimming (Lesson 05) manage this state's
+      size, not its lifetime</td>
+    </tr>
+    <tr>
+      <td><strong>Cross-session</strong><br>a memory file</td>
+      <td>Disk (or any store you own) outside the process</td>
+      <td>You never wrote it anywhere durable &mdash; not when the process exits</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note why">
+  <span class="label">Enabling it</span>
+  <p>One line, no schema &mdash; it's an Anthropic-provided tool:</p>
+  <pre><code>tools=[{"type": "memory_20250818", "name": "memory"}]</code></pre>
+  <p>It's client-side: Claude only ever requests an operation. Your handler executes it against
+  storage you own and returns a <code>tool_result</code> &mdash; the ordinary tool-use loop from
+  Lessons 03&ndash;04, applied to files.</p>
+</div>
+
+<h2>Commands</h2>
+
+<table>
+  <thead><tr><th>Command</th><th>Required fields</th><th>Success string</th><th>Notable error</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>view</code></td>
+      <td><code>path</code> (+ optional <code>view_range</code>)</td>
+      <td>Directory listing, or 1-indexed tab-separated file contents</td>
+      <td><code>"The path {path} does not exist. Please provide a valid path."</code></td>
+    </tr>
+    <tr>
+      <td><code>create</code></td>
+      <td><code>path</code>, <code>file_text</code></td>
+      <td><code>"File created successfully at: {path}"</code></td>
+      <td>Overwrite-vs-error on an existing path is your choice &mdash; both are valid</td>
+    </tr>
+    <tr>
+      <td><code>str_replace</code></td>
+      <td><code>path</code>, <code>old_str</code> (+ optional <code>new_str</code>)</td>
+      <td><code>"The memory file has been edited."</code></td>
+      <td>Zero or multiple matches of <code>old_str</code> is an error, never a silent
+      replace-all</td>
+    </tr>
+    <tr>
+      <td><code>insert</code></td>
+      <td><code>path</code>, <code>insert_line</code>, <code>insert_text</code></td>
+      <td><code>"The file {path} has been edited."</code></td>
+      <td><code>"Invalid `insert_line` parameter: {n}. It should be within the range [0,
+      {n_lines}]"</code></td>
+    </tr>
+    <tr>
+      <td><code>delete</code></td>
+      <td><code>path</code></td>
+      <td><code>"Successfully deleted {path}"</code></td>
+      <td>Must refuse a path that resolves to the memory root itself</td>
+    </tr>
+    <tr>
+      <td><code>rename</code></td>
+      <td><code>old_path</code>, <code>new_path</code></td>
+      <td><code>"Successfully renamed {old_path} to {new_path}"</code></td>
+      <td><code>"Error: The destination {new_path} already exists"</code> &mdash; never
+      overwrite on rename</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Security checklist</h2>
+
+<ul>
+  <li><strong>Path traversal.</strong> <code>/memories/../../secrets.env</code> is a real
+  request, not a hypothetical. Resolve every path to its canonical absolute form and check
+  containment under the memory root &mdash; never strip a string prefix and trust what's
+  left.</li>
+  <li><strong>The root itself.</strong> <code>delete</code> and <code>rename</code> must both
+  refuse to touch the memory root directory, not just files inside it.</li>
+  <li><strong>Sensitive data.</strong> Claude usually declines to write secrets to memory on its
+  own; don't rely on that alone &mdash; validate and strip before your handler writes.</li>
+  <li><strong>Size and expiry.</strong> Cap file size, cap what a single <code>view</code>
+  returns (page the rest via <code>view_range</code>), and expire files nothing has touched in
+  a long time.</li>
+</ul>
+
+<h2>Pairs with, doesn't replace, Lesson 05</h2>
+
+<p>Compaction and memory answer different questions. Compaction: <em>is the current window too
+big?</em> Memory: <em>will this process still exist when the answer matters?</em> A
+long-running agent needs both &mdash; memory for what must outlive a session, compaction so a
+single session doesn't blow its window before anything gets written down.</p>
+
+<footer class="colophon">
+  <h2>Sources</h2>
+  <ul style="font-size:0.875rem">
+    <li><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Claude
+    Platform Docs: Memory tool</a> &mdash; full command spec, error strings, security
+    considerations, the multisession pattern</li>
+    <li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic:
+    Effective Context Engineering for AI Agents</a> &mdash; where structured note-taking is
+    first named as a strategy, before this reference gives it a mechanism</li>
+  </ul>
+  <div class="nav-row">
+    <a href="../lessons/0006-memory.html">Lesson 06: Memory</a>
+    <a href="0005-context-budget.html">Reference: Context Budget Techniques</a>
+    <a href="0004-error-message-patterns.html">Reference: Error Message Patterns</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

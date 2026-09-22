@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory: Within-Session vs. Cross-Session State</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Memory: Within-Session vs. Cross-Session State</h1>
+  <p class="standfirst">Lesson 05 kept one conversation's window small. This lesson asks a
+  different question: when the process itself exits &mdash; crashes, finishes, gets
+  Ctrl-C'd &mdash; what's left? The answer is usually &ldquo;nothing,&rdquo; and that's the
+  gap this lesson closes.</p>
+  <p class="meta">
+    <span>Lesson 06</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>Two from memory before anything new.</p>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>You wired compaction into
+  <code>growing_context.py</code> in Lesson 05: it fires mid-run, summarizes the conversation,
+  and replaces <code>messages</code> with the summary. The script finishes, the process exits,
+  and you run it again tomorrow. Is that summary still there?</p>
+  <div class="opts">
+    <button class="opt">Yes &mdash; that's the point of compaction</button>
+    <button class="opt" data-correct>No &mdash; compaction only ever rewrites the in-memory <code>messages</code> list; nothing was written anywhere that survives the process</button>
+    <button class="opt">Only if the run used fewer than 2000 tokens</button>
+    <button class="opt">Yes, but only the model remembers it, not your script</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right, and it's the exact gap this lesson closes. Compaction is real, useful, and entirely about the WINDOW &mdash; it manages what one process sends on its next call. It has no opinion about what happens after that process ends, because nothing in it writes to disk."
+    data-when-wrong="Walk through what compact() actually did: it took `messages`, a Python list living in RAM, and replaced it with a shorter Python list &mdash; still living in the same RAM. Nothing was written to a file or a database. When the process exits, RAM goes with it, summary and all.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>Lesson 05 named &ldquo;structured
+  note-taking&rdquo; as writing notes outside the context window so they survive a reset. What
+  did that description leave unanswered &mdash; the thing you'd actually have to build to make
+  it real?</p>
+  <div class="opts">
+    <button class="opt">Nothing &mdash; the model handles all of it automatically</button>
+    <button class="opt" data-correct><em>Where</em> those notes physically live, and who reads and writes them &mdash; a concrete storage mechanism, not just the idea of one</button>
+    <button class="opt">Which model to use for writing the notes</button>
+    <button class="opt">Whether the notes should be in English or JSON</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Exactly &mdash; and that's what today's lesson supplies: a specific, client-side mechanism for exactly this, with a real path, a real file, and a harness that has to implement it. The idea from Lesson 05 gets a body."
+    data-when-wrong="&ldquo;Notes persisted outside the context window&rdquo; names a strategy, not an implementation. Something has to decide where those notes live on disk (or in a database), and something has to read and write them &mdash; that's the part Lesson 05 left as a black box and this lesson opens up.">
+  </div>
+</div>
+
+<h2>Two kinds of state, one easy conflation</h2>
+
+<p>Every agent you've built so far has had exactly one place state lives: the
+<code>messages</code> list. It's a Python list, sitting in RAM, for as long as your script's
+process is running. That's <strong>within-session state</strong> &mdash; and everything Lesson
+05 taught you (compaction, trimming, curating what's in the window) operates entirely inside
+it.</p>
+
+<table>
+  <thead><tr><th></th><th>Lives in</th><th>Survives&hellip;</th><th>Dies when&hellip;</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Within-session state</strong><br><code>messages</code></td>
+      <td>RAM, inside one process</td>
+      <td>Compaction, trimming, any Lesson-05 technique &mdash; these all keep the process
+      <em>running</em> with a smaller window</td>
+      <td>The process exits, crashes, or is killed. Every technique from Lesson 05 is powerless
+      against this.</td>
+    </tr>
+    <tr>
+      <td><strong>Cross-session state</strong><br>a file, a database row</td>
+      <td>Disk, or any store outside the process</td>
+      <td>The process exiting entirely &mdash; a brand-new invocation, minutes or months later,
+      can still read it</td>
+      <td>You never wrote it anywhere durable in the first place</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note trap">
+  <span class="label">The conflation to watch for</span>
+  <p>&ldquo;I handled context growth&rdquo; and &ldquo;my agent remembers things between runs&rdquo;
+  sound like the same accomplishment. They are not related at all. A flawlessly compacted
+  40-turn run and a completely uncompacted one both vanish, in full, the instant the process
+  exits &mdash; unless something, somewhere, wrote a fact to a file. Compaction is about
+  <em>the window's size</em>. This lesson is about <em>the process's mortality</em>.</p>
+</div>
+
+<h2>Giving it a body: the memory tool</h2>
+
+<p>Anthropic's <a
+href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">context
+engineering guidance</a> names the concrete implementation directly: a <a
+href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">memory
+tool</a> that &ldquo;lets Claude store and retrieve information across conversations in a
+directory of memory files.&rdquo; The docs are explicit about what kind of thing it is:</p>
+
+<blockquote><p>&ldquo;The memory tool operates client-side: Claude requests file operations,
+and your application executes them. You control where and how the data is stored through your
+own infrastructure.&rdquo; &mdash; <a
+href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Memory
+tool</a></p></blockquote>
+
+<p>Read that against what you already know from Lessons 03 and 04: this is <em>not</em> a new
+kind of thing. It's an ordinary [tool]/[harness] split &mdash; the model requests, your code
+executes, you return a <code>tool_result</code> &mdash; applied to file operations instead of a
+database lookup. Enabling it is one line:</p>
+
+<pre><code>tools=[{"type": "memory_20250818", "name": "memory"}]</code></pre>
+
+<p>That's the entire configuration &mdash; no input schema to write, because it's an
+Anthropic-provided tool. What you owe in return is a handler for six commands, each mapped onto
+a path under <code>/memories</code>:</p>
+
+<table>
+  <thead><tr><th>Command</th><th>Does</th><th>Success returns</th></tr></thead>
+  <tbody>
+    <tr><td><code>view</code></td><td>Directory listing, or a file's contents with 1-indexed,
+    tab-separated line numbers</td><td>The listing or the numbered content</td></tr>
+    <tr><td><code>create</code></td><td>Writes a new file</td><td><code>"File created
+    successfully at: {path}"</code></td></tr>
+    <tr><td><code>str_replace</code></td><td>Replaces one occurrence of exact text in a
+    file</td><td><code>"The memory file has been edited."</code></td></tr>
+    <tr><td><code>insert</code></td><td>Inserts a line at a given line number</td><td><code>"The
+    file {path} has been edited."</code></td></tr>
+    <tr><td><code>delete</code></td><td>Removes a file (or a directory,
+    recursively)</td><td><code>"Successfully deleted {path}"</code></td></tr>
+    <tr><td><code>rename</code></td><td>Moves or renames a file</td><td><code>"Successfully
+    renamed {old_path} to {new_path}"</code></td></tr>
+  </tbody>
+</table>
+
+<p>Notice what the API does <em>not</em> do: it does not give you storage. <a
+href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">&ldquo;Memory
+lives entirely in your application,&rdquo;</a> which is a real files-on-disk directory in
+today's build task, and could be a database or cloud storage in production. The model only ever
+emits <code>{"command": "view", "path": "/memories"}</code>; your handler decides what that
+means.</p>
+
+<div class="note why">
+  <span class="label">The API even tells the model to check first</span>
+  <p>When the memory tool is present, the API automatically injects an instruction you never
+  wrote: <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">&ldquo;ALWAYS
+  VIEW YOUR MEMORY DIRECTORY BEFORE DOING ANYTHING ELSE&rdquo;</a> &mdash; followed by
+  <em>&ldquo;ASSUME INTERRUPTION: Your context window might be reset at any moment.&rdquo;</em>
+  That second line is the mindset this lesson is teaching, stated as a system prompt: treat the
+  in-memory window as disposable, and the files as the only thing that survives.</p>
+</div>
+
+<h2>Not a replacement for compaction &mdash; a different axis</h2>
+
+<p>Lesson 05's four techniques and this lesson's memory tool are not competing solutions to the
+same problem. The docs pair them explicitly:</p>
+
+<blockquote><p>&ldquo;For long-running agents, consider using both: compaction keeps the active
+context small without client-side bookkeeping, and memory preserves the information that must
+survive summarization.&rdquo; &mdash; <a
+href="https://platform.claude.com/docs/en/build-with-claude/context-editing">Memory tool:
+Using with compaction</a></p></blockquote>
+
+<p>One axis is <em>how big is the window right now</em> (Lesson 05). The other is <em>what
+happens when this process is gone</em> (today). A long-running coding agent needs both: memory
+files that outlive any single session, and compaction so a single long session doesn't blow its
+window before it gets the chance to write anything down.</p>
+
+<h2>Spot the flaws</h2>
+
+<p>Here's a first-pass handler for three of the six commands. It runs &mdash; it will pass a
+quick demo &mdash; and it has three real, separately-fixable problems. Find them before you
+write your own.</p>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>Find the three real flaws.</p>
+<pre><code>class MemoryHandler:
+    def __init__(self, root="./memories"):
+        self.root = root
+
+    def view(self, path):
+        real_path = self.root + path.replace("/memories", "")
+        with open(real_path) as f:
+            return f.read()
+
+    def create(self, path, file_text):
+        real_path = self.root + path.replace("/memories", "")
+        with open(real_path, "w") as f:
+            f.write(file_text)
+        return f"File created successfully at: {path}"
+
+    def str_replace(self, path, old_str, new_str=""):
+        real_path = self.root + path.replace("/memories", "")
+        with open(real_path) as f:
+            content = f.read()
+        content = content.replace(old_str, new_str)
+        with open(real_path, "w") as f:
+            f.write(content)
+        return "The memory file has been edited."
+
+    def delete(self, path):
+        real_path = self.root + path.replace("/memories", "")
+        os.remove(real_path)
+        return f"Successfully deleted {path}"</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="&ldquo;path.replace(&quot;/memories&quot;, &quot;&quot;)&rdquo; string-substitutes the prefix out and trusts whatever's left. A path like <code>/memories/../../secrets.env</code> becomes <code>/../../secrets.env</code>, and Python's file APIs will happily walk right out of <code>root</code>. This is exactly the attack the docs name directly: &ldquo;A malicious path such as <code>/memories/../../secrets.env</code> can reach files outside the <code>/memories</code> directory.&rdquo;">Nothing stops a path from resolving outside the memory root</button>
+      <button class="aopt" data-flaw
+        data-why="`str_replace` calls Python's `.replace()`, which swaps every occurrence, silently. The spec calls for exactly one occurrence &mdash; if `old_str` appears twice, this handler edits both without telling anyone, which is a quiet way to corrupt a memory file the model believed it edited precisely once.">str_replace silently replaces every occurrence, not exactly one</button>
+      <button class="aopt" data-flaw
+        data-why="delete() never checks whether real_path resolves to the memory root itself. Ask the model to delete '/memories' and this handler happily wipes the whole directory &mdash; a single call with no error, no confirmation, and every other file in it gone with it.">delete() can remove the memory root directory itself</button>
+      <button class="aopt"
+        data-why="create() overwriting an existing file without complaint is a defensible choice, not a flaw &mdash; the docs say so directly: &ldquo;Returning the error is the reference behavior, and overwriting instead is a valid implementation choice.&rdquo; Pick one and be consistent; either is fine."><code>create()</code> overwrites an existing file instead of erroring</button>
+      <button class="aopt"
+        data-why="Returning file contents as a plain string with no line numbers is not what the spec recommends, but it isn't a security or correctness bug &mdash; the docs say plainly: &ldquo;Claude reads whatever text your tool result contains, so you can return different strings if your application needs to.&rdquo; It'll work slightly worse for multi-line edits, not break.">view() doesn't return line numbers with the file contents</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<p>Without scrolling: the property a memory file has that <code>messages</code> never had, and
+the specific string manipulation bug that lets a malicious path escape <code>/memories</code>.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="What survives a process exit, and what doesn't:&#10;&#10;The traversal bug, in one sentence:"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>A memory file survives the process exiting; <code>messages</code> is RAM and dies with
+    it. The traversal bug: stripping a string prefix (<code>"/memories"</code>) and trusting
+    the remainder lets <code>..</code> segments walk the real filesystem path outside the
+    memory root &mdash; the fix is resolving to a canonical absolute path and checking
+    containment, not string substitution.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 20 minutes</span>
+  <p>Everything is in <code>practice/06-memory/</code>. Run it as <strong>two separate process
+  invocations</strong>, not one script called twice &mdash; that's the whole point:</p>
+  <pre><code>uv run python practice/06-memory/memory_agent.py "&lt;prompt&gt;"</code></pre>
+  <ol>
+    <li><strong>Implement <code>MemoryHandler</code>.</strong> Five TODOs: <code>_resolve</code>
+    (map <code>/memories/...</code> onto a real path and refuse anything that resolves outside
+    the root), <code>view</code>, <code>create</code>, <code>str_replace</code> (exactly one
+    occurrence, or an error), and <code>delete</code> (refusing the root itself).</li>
+    <li><strong>Session one.</strong> Run with a prompt telling it to remember a preference and
+    save it. Record what it called, in order, and what landed in
+    <code>practice/06-memory/memories/</code>.</li>
+    <li><strong>Session two &mdash; a brand-new process.</strong> Run again, asking for that
+    preference back, with nothing carried over from session one. Did it answer correctly?
+    What did it call before answering?</li>
+    <li><strong>Break it on purpose.</strong> Weaken the containment check, ask it to write
+    outside <code>/memories</code>, confirm something escapes. Put the check back.</li>
+    <li><strong>One line, out loud.</strong> The property a memory file has that
+    <code>messages</code> never had &mdash; and the property <code>messages</code> has that a
+    memory file doesn't.</li>
+  </ol>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> <a
+  href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool">Memory
+  tool</a> (Claude Platform Docs) &mdash; read the full command reference and the
+  &ldquo;Multisession software development pattern&rdquo; section, which is the production
+  version of today's two-invocation exercise, scaled to a whole project.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0006-memory-reference.html">Reference: Memory Tool</a>
+    <a href="../reference/0005-context-budget.html">Reference: Context Budget Techniques</a>
+    <a href="../reference/0003-tool-surface-checklist.html">Reference: Tool Surface Checklist</a>
+    <a href="0005-context-engineering.html">Lesson 05: Context Engineering</a>
+    <a href="0004-when-the-tool-fails.html">Lesson 04: When the Tool Fails</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> Guardrails &mdash; permissions, gating, prompt injection, and
+  the harness's job in keeping a tool-using agent from doing something it shouldn't.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring the <code>_resolve</code>
+    implementation you wrote. Also worth pushing on: &ldquo;if a malicious tool result could
+    ask the model to write to memory, is that a prompt-injection path into cross-session
+    state?&rdquo;, and &ldquo;what should actually happen when two sessions try to write the
+    same memory file at once?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>

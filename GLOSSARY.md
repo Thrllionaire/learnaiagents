@@ -189,3 +189,28 @@ fetch) for window space.
 _Avoid_: Lazy loading (the general CS term; use this when speaking specifically about agent
 context), RAG (retrieval-augmented generation is the broader technique; this is retrieval
 timed to need, inside an agent loop)
+
+**Within-session state**:
+State held in RAM inside one running process — the `messages` list is the example you've built
+every lesson. Dies the instant the process exits, no matter how well [compaction] managed its
+size while running.
+_Avoid_: Short-term memory (loaded with human connotations this term doesn't need)
+
+**Cross-session state**:
+State written to a file, database, or other store outside the process, readable by a later,
+independent invocation. What distinguishes this from [within-session state] is not the
+technology — it's whether a brand-new process can still see it.
+_Avoid_: Long-term memory, persistence (too generic on its own)
+
+**Memory tool**:
+Anthropic's client-side tool (`{"type": "memory_20250818", "name": "memory"}`) for
+[cross-session state]: Claude requests file operations against a `/memories` directory, and the
+harness executes them against storage it owns. The productized form of [structured
+note-taking] — the strategy gets a concrete mechanism.
+_Avoid_: RAG, vector store (this is plain files with six commands, not retrieval)
+
+**Client-side tool**:
+An Anthropic-provided tool (the memory tool, the bash tool, the text editor tool) whose
+behavior your harness implements, as opposed to a server-side tool the API executes for you.
+The model only ever emits a request; nothing happens until your code runs it.
+_Avoid_: Built-in tool (ambiguous about which side executes it)

@@ -168,8 +168,8 @@ clearing</p>
 <p><strong>Structured note-taking</strong>: The agent regularly writes
 notes to persistent storage outside the context window, so state
 survives a reset. Also called agentic memory. Proactive, unlike
-[compaction] — written before it’s needed, not after the window is
-full. <em>Avoid</em>: Scratchpad (the mechanism, not the strategy),
+[compaction] — written before it’s needed, not after the window is full.
+<em>Avoid</em>: Scratchpad (the mechanism, not the strategy),
 logging</p>
 <p><strong>Sub-agent architecture</strong>: Delegating a sub-task to a
 separate agent with its own clean context window, which reports back a
@@ -186,6 +186,31 @@ latency (a round trip per fetch) for window space. <em>Avoid</em>: Lazy
 loading (the general CS term; use this when speaking specifically about
 agent context), RAG (retrieval-augmented generation is the broader
 technique; this is retrieval timed to need, inside an agent loop)</p>
+<p><strong>Within-session state</strong>: State held in RAM inside one
+running process — the <code>messages</code> list is the example you’ve
+built every lesson. Dies the instant the process exits, no matter how
+well [compaction] managed its size while running. <em>Avoid</em>:
+Short-term memory (loaded with human connotations this term doesn’t
+need)</p>
+<p><strong>Cross-session state</strong>: State written to a file,
+database, or other store outside the process, readable by a later,
+independent invocation. What distinguishes this from [within-session
+state] is not the technology — it’s whether a brand-new process can
+still see it. <em>Avoid</em>: Long-term memory, persistence (too generic
+on its own)</p>
+<p><strong>Memory tool</strong>: Anthropic’s client-side tool
+(<code>{"type": "memory_20250818", "name": "memory"}</code>) for
+[cross-session state]: Claude requests file operations against a
+<code>/memories</code> directory, and the harness executes them against
+storage it owns. The productized form of [structured note-taking] — the
+strategy gets a concrete mechanism. <em>Avoid</em>: RAG, vector store
+(this is plain files with six commands, not retrieval)</p>
+<p><strong>Client-side tool</strong>: An Anthropic-provided tool (the
+memory tool, the bash tool, the text editor tool) whose behavior your
+harness implements, as opposed to a server-side tool the API executes
+for you. The model only ever emits a request; nothing happens until your
+code runs it. <em>Avoid</em>: Built-in tool (ambiguous about which side
+executes it)</p>
 
 <footer>
   <div class="pagenav">
