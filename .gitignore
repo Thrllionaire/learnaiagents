@@ -12,3 +12,8 @@ __pycache__/
 .DS_Store
 *.swp
 .impeccable/
+
+# Private progress tracking (separate repo: learnaiagents-progress)
+/learning-records/
+/practice
+NOTES.md
