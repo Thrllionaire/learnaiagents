@@ -252,6 +252,40 @@ of real failures the judge catches and TNR is the fraction of good
 outputs it leaves alone. Report both instead of raw agreement, which
 rewards a judge for how rare failures are. <em>Avoid</em>: Accuracy,
 agreement % (on their own, for an imbalanced label set)</p>
+<p><strong>Multi-agent system</strong>: A [agent] whose “tools” are
+other agents — a lead agent that decides how many workers to spawn,
+what each one investigates, and when it has enough, then merges what
+comes back. Unlike [orchestrator–workers], nothing about the shape is
+fixed by the developer; the lead chooses it fresh every run.
+<em>Avoid</em>: Orchestrator–workers (that name is reserved for the
+fixed-topology workflow), agent swarm, supervisor pattern</p>
+<p><strong>Lead agent</strong>: The top-level agent in a [multi-agent
+system], whose own tool calls spawn and read back from workers rather
+than acting on the world directly. Pays the full [cost of agency] twice
+over: once for its own turns, and again for every worker it reads a
+report from. <em>Avoid</em>: Orchestrator (reserved for the workflow
+pattern), manager, coordinator</p>
+<p><strong>Delegation instruction</strong>: What a lead agent hands a
+worker when it spawns it — the worker’s entire view of its job, with no
+other source of truth. Needs the same four things a tool schema needs
+to be usable: an objective, an output format, tool/source guidance, and
+a task boundary. Missing any one causes duplicated work or gaps.
+<em>Avoid</em>: Prompt, instructions (too generic — this is a runtime
+artifact the lead writes, not a fixed system prompt)</p>
+<p><strong>Effort scaling</strong>: Explicit guidance mapping question
+complexity to worker count — a lookup fact needs one agent and a
+handful of calls, open-ended research needs ten or more. Without it, a
+lead treats every question like the hardest one it has ever seen.
+<em>Avoid</em>: Autoscaling (a different, infrastructure-layer concept)</p>
+<blockquote>
+<p><strong>Ambiguity resolved:</strong> <strong>Orchestrator–workers</strong>
+(Lesson 02) and <strong>multi-agent system</strong> (Lesson 10) can
+produce an identical-looking diagram — one coordinator, several
+workers, a merge — and still be different categories. The test is
+still whether <em>you</em> fixed the topology or the model did. A fixed
+number of subtasks the model fills in is a workflow; a lead that
+decides the worker count itself, every run, is an agent.</p>
+</blockquote>
 
 <footer>
   <div class="pagenav">

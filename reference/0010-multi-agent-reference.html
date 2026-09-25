@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Agent Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Multi-Agent Reference</h1>
+  <p class="standfirst">Which pattern you're actually building, what it costs, and the
+  checklist for the one instruction the whole system depends on.</p>
+  <p class="meta">
+    <span>Reference 10</span><span class="sep">&middot;</span>
+    <span>Orchestration at one more level</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-25</span>
+  </p>
+</header>
+
+<h2>Which pattern is it</h2>
+
+<table>
+  <thead><tr><th>Pattern</th><th>Who fixes the topology</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Orchestrator&ndash;workers</strong> (workflow)</td>
+    <td>You: the fan-out shape and the merge step are fixed code. The model fills in
+    <em>what</em> the fixed number of subtasks contain.</td></tr>
+    <tr><td><strong>Sub-agent architecture</strong></td>
+    <td>The model decides <em>when</em> to delegate one sub-task, for a clean context
+    window &mdash; not for parallelism.</td></tr>
+    <tr><td><strong>Multi-agent system</strong></td>
+    <td>The model: how many workers, what each does, when it has enough. Every run can
+    look different. This is an agent, built from workflow-shaped pieces (a fan-out, a
+    merge) nested inside it.</td></tr>
+  </tbody>
+</table>
+
+<h2>The cost, in order of where it comes from</h2>
+
+<table>
+  <tbody>
+    <tr><td><strong>~4&times;</strong></td><td>agent vs. one chat call &mdash; depth: the
+    transcript resent every turn of one run.</td></tr>
+    <tr><td><strong>~15&times;</strong></td><td>multi-agent vs. one chat call &mdash; width:
+    several full agent runs at once, each paying the depth tax, plus a lead that reads and
+    merges what comes back.</td></tr>
+  </tbody>
+</table>
+
+<p>Source: <a
+href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic, How We
+Built Our Multi-Agent Research System</a>.</p>
+
+<h2>The three-part fit test</h2>
+
+<p>All three, or don't build it:</p>
+<ol>
+  <li><strong>Value</strong> high enough to justify ~15&times; the tokens of a single call.</li>
+  <li><strong>Real parallelizable work</strong> &mdash; independent sub-tasks, not a
+  sequence with heavy interdependencies (&ldquo;most coding tasks involve fewer truly
+  parallelizable tasks than research&rdquo;).</li>
+  <li><strong>More information than one context window</strong> can hold, or a tool
+  interface too complex for one agent to hold in its head.</li>
+</ol>
+
+<h2>The delegation instruction checklist</h2>
+
+<p>Every worker's entire view of its job. Missing any of these: duplicated work, gaps, or a
+worker that can't find what it needs.</p>
+
+<table>
+  <tbody>
+    <tr><td><strong>Objective</strong></td><td>What, specifically, this worker is finding
+    out &mdash; not the whole question restated.</td></tr>
+    <tr><td><strong>Output format</strong></td><td>What shape the report back should
+    take, so the lead can merge it without another round trip.</td></tr>
+    <tr><td><strong>Tool / source guidance</strong></td><td>Which tools to use and how.
+    &ldquo;Bad tool descriptions can send agents down completely wrong paths.&rdquo;</td></tr>
+    <tr><td><strong>Task boundary</strong></td><td>What this worker owns, so a second
+    worker with a different objective can't end up covering the same ground.</td></tr>
+  </tbody>
+</table>
+
+<h2>Effort scaling</h2>
+
+<p>Give the lead an explicit rule of thumb, or it treats every question like the hardest one
+it's seen: simple fact lookup &rarr; 1 agent, a handful of tool calls. Comparison across a
+few items &rarr; 2&ndash;4 subagents. Open-ended research &rarr; 10+ subagents with divided
+responsibilities. Without a rule, expect &ldquo;spawning 50 subagents for simple
+queries.&rdquo;</p>
+
+<h2>Evaluating it</h2>
+
+<ul>
+  <li>Start with ~20 realistic queries &mdash; a calibration set (see <a
+  href="0009-llm-judge-reference.html">Reference 09</a>), not a validation set.</li>
+  <li>Grade the <strong>end state</strong>: whether the final answer is correct and
+  complete. Not the path &mdash; two correct runs can spawn different numbers of workers in
+  a different order.</li>
+  <li>An LLM judge scores a rubric (factual accuracy, citation accuracy, completeness,
+  source quality, tool efficiency) &mdash; one judge, several properties, because there's
+  more surface than a single binary-verdict judge covers.</li>
+  <li>Read transcripts yourself anyway. &ldquo;People testing agents find edge cases that
+  evals miss&rdquo;: hallucinations, systematic source bias, things that pass a rubric and
+  are still wrong.</li>
+</ul>
+
+<h2>The sentence for a design review</h2>
+
+<p>&ldquo;Multi-agent costs about <em>n</em>&times; the tokens of a single agent on this
+task, measured on our own run. It's worth it because [value / parallel work / window size]
+&mdash; and here's the trigger that would make me pull it back to a single agent: &hellip;&rdquo;</p>
+
+<footer class="colophon">
+  <div class="nav-row">
+    <a href="../lessons/0010-multi-agent-orchestrator-workers.html">Lesson 10: Multi-Agent</a>
+    <a href="0002-decision-and-patterns.html">Reference: Decision Ladder &amp; Patterns</a>
+    <a href="0009-llm-judge-reference.html">Reference: LLM Judges</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../index.html">Home</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

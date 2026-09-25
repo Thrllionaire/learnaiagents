@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Agent: What the Extra Agents Cost</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Multi-Agent: What the Extra Agents Cost</h1>
+  <p class="standfirst">Lesson 02's orchestrator&ndash;workers pattern was a
+  <em>workflow</em>: you fixed the fan-out-and-merge shape, the model only filled in the
+  subtasks. Today the model picks the shape too &mdash; how many workers, on what, and when
+  to stop. That single change is why the same-looking diagram gets a different name, and why
+  the bill looks nothing alike. You'll build the real thing and get the number for
+  yourself.</p>
+  <p class="meta">
+    <span>Lesson 10</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 30 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 1 of 2</span>Anthropic's taxonomy files
+  orchestrator&ndash;workers as a <em>workflow</em>, not an agent, even though the model
+  makes real decisions inside it. What's the test this workspace uses to decide which
+  side of the line a system is on?</p>
+  <div class="opts">
+    <button class="opt">Whether more than one LLM call is involved</button>
+    <button class="opt" data-correct>Whether the developer or the model fixed the topology</button>
+    <button class="opt">Whether the subtasks run in parallel or in sequence</button>
+    <button class="opt">Whether a human reviews the merged output before it ships</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. If you fixed the fan-out-and-merge shape and the model only fills in the contents, it's a workflow. If the model picks the shape &mdash; how many branches, what each one does &mdash; it's an agent. Today's system fails that test on purpose: the lead decides the topology, every run."
+    data-when-wrong="The test is topology, not call count or parallelism. If you fixed the fan-out-and-merge shape and the model only fills in the contents, it's a workflow. If the model picks the shape itself, it's an agent. Today's system fails that test on purpose.">
+  </div>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>Lesson 09: an always-pass judge scored
+  95% raw agreement on a set with 10 failures in 200 cases. Why was that number misleading?</p>
+  <div class="opts">
+    <button class="opt">It used the wrong model for the judge</button>
+    <button class="opt" data-correct>It rewarded the judge for how rare failures were, not for catching any</button>
+    <button class="opt">The 200 cases weren't independently sampled</button>
+    <button class="opt">Raw agreement can't be computed without a held-out set</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right &mdash; TPR was 0%. It caught none of the 10 real failures and got credit for the 190 it didn't need to catch. Today's eval section leans on the same fix: measure the thing you actually care about, not the number that flatters the system."
+    data-when-wrong="TPR was 0%: it caught none of the 10 real failures and got credit for the 190 honest cases it didn't need to catch anyway. Today's eval section leans on the same fix &mdash; measure the thing you actually care about, not the number that flatters the system.">
+  </div>
+</div>
+
+<h2>Three things that look alike and aren't</h2>
+
+<p>You've now met three ways one agent hands work to another, and the vocabulary matters
+because they cost and fail differently.</p>
+
+<table>
+  <thead><tr><th>Pattern</th><th>Who decides the shape</th><th>Where you met it</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Orchestrator&ndash;workers</strong> (workflow)</td>
+      <td>You fix the fan-out and the merge; the model fills in the subtasks</td>
+      <td>Lesson 02</td>
+    </tr>
+    <tr>
+      <td><strong>Sub-agent architecture</strong></td>
+      <td>The model decides <em>when</em> to delegate one messy sub-task, for a clean
+      context window</td>
+      <td>Lesson 05</td>
+    </tr>
+    <tr>
+      <td><strong>Multi-agent system</strong></td>
+      <td>The model decides how many workers, what each one does, and when it has enough
+      &mdash; every run</td>
+      <td>Today</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Anthropic's own production research system is the third kind: <a
+href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;a lead agent
+coordinates the process while delegating to specialized subagents that operate in
+parallel.&rdquo;</a> Each subagent is a full agent loop &mdash; its own context window, its
+own tools, its own turns &mdash; and the lead is a full agent loop too, except its only
+&ldquo;tool&rdquo; is spawning more agents. Nest the pattern from Lesson 01 inside itself and
+you have today's build.</p>
+
+<h2>The number, again, this time squared</h2>
+
+<p>Lesson 02 gave you the first bill: input tokens grow roughly with the square of a single
+run's length, because the whole transcript is resent every turn. Multi-agent adds a second
+axis. Every worker is a full agent, paying that same tax independently, and the lead pays it
+too, on top of whatever the workers report back.</p>
+
+<div class="note why">
+  <span class="label">Anthropic's own numbers</span>
+  <p><a
+  href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;Agents
+  typically use about 4&times; more tokens than chat interactions, and multi-agent systems
+  use about 15&times; more tokens than chats.&rdquo;</a></p>
+  <p>Chat &rarr; agent was roughly 4&times;, from depth: one run, many turns, resending the
+  transcript each time. Chat &rarr; multi-agent is roughly 15&times; &mdash; not 4&times;4,
+  but the same idea from a second direction: width, several full agent runs happening at
+  once, each paying its own depth tax, then a lead that has to read and merge what came
+  back.</p>
+</div>
+
+<h2>What breaks when agents coordinate agents</h2>
+
+<p>The failure modes aren't new categories &mdash; they're the workflow-vs-agent argument
+from Lesson 02, showing up one level up.</p>
+
+<table>
+  <thead><tr><th>Failure</th><th>What it looks like</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Duplicated work</strong></td>
+      <td>A vague objective like &ldquo;research the semiconductor shortage&rdquo; gives two
+      workers no way to know they're covering the same ground. Both report back, the lead
+      has to notice the overlap itself, and you paid for the duplicate run either way.</td>
+    </tr>
+    <tr>
+      <td><strong>No effort scaling</strong></td>
+      <td>Anthropic names this directly: <a
+      href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;spawning
+      50 subagents for simple queries&rdquo;</a>. A lead with no guidance on how many workers
+      a question deserves treats every question like the hardest one it's ever seen.</td>
+    </tr>
+    <tr>
+      <td><strong>Compounding errors, one level up</strong></td>
+      <td>Lesson 02's &ldquo;95% per step, 60% over ten steps&rdquo; math still applies
+      inside each worker. Now the lead also has to synthesize from reports it can't fully
+      verify, so a wrong worker report becomes context the lead trusts, the same way a wrong
+      tool result becomes context a single agent trusts.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The delegation instruction is a tool schema you write at runtime</h2>
+
+<p>You already know how to fix this &mdash; it's Lesson 03 again, one level up. A tool
+schema is the model's entire view of what a tool does; a bad description sends the model
+down the wrong path with nothing to correct it. A delegation instruction is the same object:
+it's the lead's entire view of what a worker should do, and the worker has no other source
+of truth. Anthropic's fix reads like a tool-description checklist:</p>
+
+<blockquote><p>&ldquo;Each subagent needs an objective, an output format, guidance on the
+tools and sources to use, and clear task boundaries&hellip; Without detailed task
+descriptions, agents duplicate work, leave gaps, or fail to find necessary
+information.&rdquo; &mdash; <a
+href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic</a></p></blockquote>
+
+<p>Today's build hands you a lead whose delegation instruction is one clause long:
+&ldquo;Delegate some research to a worker agent.&rdquo; No objective, no output format, no
+tool guidance, no boundary. You'll watch what that costs, rewrite it, and watch again.</p>
+
+<h2>Spot the flaws</h2>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>A teammate's multi-agent research
+    assistant, about to ship. Find the four real flaws.</p>
+<pre><code>LEAD_MODEL = "claude-haiku-4-5"
+LEAD_PROMPT = """You can spawn up to 20 workers with spawn_worker.
+Use as many as you think the question needs."""
+
+SPAWN_WORKER = {
+  "description": "Have a worker look into something.",
+  ...
+}
+
+# Eval: ran the same 8 questions we used while building this,
+# lead scored itself pass/fail on each with a one-line prompt.
+# 8/8 -> shipped.</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="&quot;Use as many as you think the question needs&quot; has no effort-scaling guidance at all &mdash; no rule of thumb for a simple vs. a complex query, and a cap of 20 with no floor. This is exactly the &quot;spawning 50 subagents for simple queries&quot; failure, just with a lower ceiling.">The prompt gives no effort-scaling guidance for worker count</button>
+      <button class="aopt" data-flaw
+        data-why="&quot;Have a worker look into something&quot; has no objective, output format, tool guidance, or task boundary &mdash; the four things a delegation instruction needs. Two workers given the same vague nudge have no way to know they're covering the same ground.">The delegation instruction has no objective or task boundary</button>
+      <button class="aopt" data-flaw
+        data-why="The system grading its own output is self-enhancement bias with nothing to correct it &mdash; the same reason Lesson 09's judge was a different, stronger model than the agent under test. A lead scoring its own work will tend to agree with itself."
+      >The eval uses the system itself as the judge of its own output</button>
+      <button class="aopt" data-flaw
+        data-why="8 questions, all from the build set, with no held-out cases: this is a live version of Lesson 09's overfitting trap. Anthropic's own guidance is to start with about 20 realistic queries &mdash; even that is calibration, not validation, and reusing the build questions makes it worse."
+      >The eval reuses the same questions the system was built against</button>
+      <button class="aopt"
+        data-why="Haiku as the lead is a real cost decision, not automatically a flaw &mdash; the question is whether it's strong enough to synthesize what the workers report. Nothing here tells you that failed; it's a thing to measure, not assume."
+      >It uses a cheaper model for the lead agent</button>
+      <button class="aopt"
+        data-why="Letting workers run in parallel is the point of the pattern &mdash; it's the one place multi-agent genuinely buys something back for the extra tokens. Not a flaw."
+      >It runs workers in parallel instead of one at a time</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<h2>Evaluating a system you can't fully read</h2>
+
+<p>You can't eyeball a multi-agent transcript the way you eyeballed Lesson 08's four-line
+tool call. There's a lead transcript and N worker transcripts, and the thing you actually
+care about &mdash; did the final answer cover the ground it needed to, accurately &mdash;
+lives in the merge, not in any one piece. Anthropic's own practice reuses everything from
+Lessons 08&ndash;09, at a slightly different scale:</p>
+
+<ul>
+  <li><strong>Start absurdly small.</strong> <a
+  href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;Start
+  testing with a small set&mdash;about 20 queries representative of real usage
+  patterns&rdquo;</a> before building anything larger. That's Lesson 09's calibration set,
+  not a validation set, and the same caveat applies.</li>
+  <li><strong>Grade the end state, not the path.</strong> Two leads can reach the same
+  correct answer by spawning a different number of workers, in a different order. Grading
+  whether it spawned &ldquo;the right&rdquo; workers punishes valid alternate paths; grading
+  whether the final answer is correct doesn't.</li>
+  <li><strong>An LLM judge, plus a human who reads transcripts anyway.</strong> The judge
+  scores factual accuracy, citation accuracy, completeness, source quality, tool
+  efficiency &mdash; a rubric, same shape as Lesson 09's binary-verdict judge, just with more
+  properties because there's more to check. But <a
+  href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;people
+  testing agents find edge cases that evals miss&rdquo;</a>: hallucinated facts, systematic
+  source bias, the kind of thing that doesn't fail a rubric but is still wrong.</li>
+</ul>
+
+<div class="note trap">
+  <span class="label">The domain has to earn the pattern</span>
+  <p>Anthropic is direct about the ceiling: <a
+  href="https://www.anthropic.com/engineering/multi-agent-research-system">&ldquo;most coding
+  tasks involve fewer truly parallelizable tasks than research, and LLM agents are not yet
+  great at coordinating and delegating to other agents in real time.&rdquo;</a> The domains
+  where multi-agent earns its 15&times; are high-value, genuinely parallel, and produce more
+  information than one context window could hold. A task that's none of those three things
+  should stay a single agent, or a workflow, or one call &mdash; the Lesson 02 ladder didn't
+  stop applying just because the pattern got a fancier name.</p>
+</div>
+
+<h2>Recall it cold</h2>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="What makes today's pattern an agent rather than Lesson 02's orchestrator-workers workflow?&#10;&#10;What four things does a delegation instruction need?&#10;&#10;Roughly what's the token multiplier vs. a plain chat call, and where does it come from?"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>The lead, not you, decides the topology &mdash; how many workers, what each does,
+    when to stop &mdash; every run. A delegation instruction needs an objective, an output
+    format, tool/source guidance, and a task boundary; without them workers duplicate work or
+    leave gaps. Roughly 4&times; a plain chat call for a single agent (depth: the transcript
+    resent every turn), roughly 15&times; for multi-agent (width: several full agent runs
+    each paying that tax, plus a lead that has to read and merge what comes back).</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 30 minutes</span>
+  <p>Everything is in <code>practice/10-multi-agent/</code>. <code>single_agent.py</code> is
+  the baseline you built the measuring habit for in Lesson 02. <code>multi_agent.py</code> is
+  a lead with a <code>spawn_worker</code> tool, shipping with the vague, one-clause
+  delegation instruction the audit above was about. <code>NOTES.md</code> has the checklist.
+  Same house rule as Lessons 08&ndash;09: every answer is a sentence you wrote, paste the
+  output before you write it.</p>
+  <ol>
+    <li><strong>Predict.</strong> Guess the worker count and the token ratio before running
+    anything.</li>
+    <li><strong>Baseline.</strong> Run <code>single_agent.py</code>. Paste the numbers.</li>
+    <li><strong>The lead, as shipped.</strong> Run <code>multi_agent.py</code>. Read the
+    worker log for overlap. Compute the real token ratio against your baseline.</li>
+    <li><strong>Fix the delegation instruction.</strong> Rewrite
+    <code>SPAWN_WORKER_SCHEMA</code>'s description using the four things it needs. Predict
+    what changes, then rerun.</li>
+    <li><strong>Say no, defensibly.</strong> Argue against shipping multi-agent for this
+    exact task, using the three-part &ldquo;suitable domain&rdquo; test. Name the one thing
+    that would change your mind.</li>
+    <li><strong>The sentence.</strong> Why should this ship over the single agent &mdash; or
+    why shouldn't it? Your numbers, plus one honest caveat about what a 3-item comparison
+    does and doesn't prove.</li>
+  </ol>
+  <p>All Haiku, lead plus up to three workers per run. A few cents even run several
+  times.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> <a
+  href="https://www.anthropic.com/engineering/multi-agent-research-system">How We Built Our
+  Multi-Agent Research System</a> (Anthropic Engineering). Read the &ldquo;Orchestrator&ndash;worker
+  pattern&rdquo;, &ldquo;Prompt engineering&rdquo;, and &ldquo;Evaluations&rdquo; sections in
+  full &mdash; today's lesson compresses about a third of it. The &ldquo;Challenges&rdquo;
+  section, which today only quotes from, is worth reading end to end before you design one of
+  these for real.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0010-multi-agent-reference.html">Reference: Multi-Agent</a>
+    <a href="../reference/0002-decision-and-patterns.html">Reference: Decision Ladder &amp; Patterns</a>
+    <a href="0002-workflow-or-agent.html">Lesson 02: Workflow or Agent?</a>
+    <a href="0009-llm-judges.html">Lesson 09: LLM Judges</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../resources.html">Resources</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> the capstone &mdash; a portfolio agent that has to survive
+  hostile technical questioning, built from everything Lessons 01&ndash;10 gave you.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring the token ratio, the worker
+    overlap you found (or didn't), and your no-ship argument. Also worth asking:
+    &ldquo;how would I add a real held-out eval set for this, not just 20 calibration
+    cases?&rdquo; and &ldquo;what changes about permission gating (Lesson 07) once a worker,
+    not the user, is the one issuing a request?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>
