@@ -237,3 +237,23 @@ request from a person, and so isn't guaranteed to trip the same refusal a blunt,
 request would.
 _Avoid_: Jailbreak (targets the model's own refusal training directly; this targets whatever
 reads the tool_result next, regardless of the model's scruples)
+
+**LLM judge**:
+A model used as a grader for a property code can't check, like honesty, tone or
+faithfulness. It returns a critique and then a binary verdict for one property. It doesn't
+count as a grader until you've measured its agreement with human labels.
+_Avoid_: LLM-as-a-judge used for a Likert-scale "quality score" (a different, weaker design),
+auto-eval (hides that a model is making the call)
+
+**Criteria drift**:
+The finding that "users need criteria to grade outputs, but grading outputs helps users
+define criteria" (Shankar et al.). The reason labels come before the judge prompt: the
+labels are the spec, and they only settle once you've graded real outputs.
+_Avoid_: Label noise (that suggests error; drift is the criteria becoming clearer)
+
+**TPR / TNR (for a judge)**:
+With human labels as ground truth and "positive" meaning a failure is present, TPR is the
+fraction of real failures the judge catches and TNR is the fraction of good outputs it
+leaves alone. Report both instead of raw agreement, which rewards a judge for how rare
+failures are.
+_Avoid_: Accuracy, agreement % (on their own, for an imbalanced label set)

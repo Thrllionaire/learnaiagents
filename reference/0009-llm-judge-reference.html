@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Judge Reference</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>LLM Judge Reference</h1>
+  <p class="standfirst">The build order, the prompt rules, and the two numbers a judge has
+  to report before anyone should trust it. This card continues the evals card: that one
+  covers graders code can run, and this one covers the grader you have to calibrate.</p>
+  <p class="meta">
+    <span>Reference 09</span><span class="sep">&middot;</span>
+    <span>Evals, part 2: model-based grading</span><span class="sep">&middot;</span>
+    <span>Verified 2026-09-22</span>
+  </p>
+</header>
+
+<h2>When to reach for one</h2>
+
+<p>&ldquo;Choosing deterministic graders where possible, LLM graders where necessary&hellip;
+and using human graders judiciously for additional validation&rdquo; (<a
+href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Anthropic</a>).
+Use a judge when the property is about <strong>meaning</strong>: honesty, tone,
+faithfulness, whether the reply answered the question. If you can write it as a regex, a
+file check, or a tool-call check, write it as code.</p>
+
+<h2>Build order</h2>
+
+<ol>
+  <li><strong>Label first.</strong> Read real outputs. Give each a pass/fail verdict and a
+  critique. Your criteria will change as you go (<em>criteria drift</em>, <a
+  href="https://arxiv.org/abs/2404.12272">Shankar et al.</a>), and that's expected.</li>
+  <li><strong>Baseline.</strong> Score an always-pass judge against your labels. Any real
+  judge has to beat it on TPR.</li>
+  <li><strong>Write the prompt from the critiques.</strong> One property, binary
+  verdict.</li>
+  <li><strong>Run it, then read every disagreement.</strong> Decide who was wrong. Fix the
+  prompt <em>or</em> the label, whichever was actually wrong.</li>
+  <li><strong>Hold out a test set.</strong> Report the final numbers on labels the prompt
+  was never tuned against.</li>
+  <li><strong>Re-calibrate periodically.</strong> &ldquo;LLM-based rubrics should be
+  frequently calibrated against expert human judgment.&rdquo;</li>
+</ol>
+
+<h2>Prompt rules</h2>
+
+<table>
+  <tbody>
+    <tr><td><strong>Binary</strong></td><td>Pass/fail, not 1&ndash;5. Adjacent scale
+    points are &ldquo;subjective and inconsistent across annotators&rdquo; (<a
+    href="https://hamel.dev/blog/posts/evals-faq/">FAQ</a>).</td></tr>
+    <tr><td><strong>One property</strong></td><td>&ldquo;A separate judge for each type of
+    failure.&rdquo;</td></tr>
+    <tr><td><strong>Reason, then verdict</strong></td><td>Put the critique field before
+    the verdict field. &ldquo;Ask the LLM to reason first before producing an evaluation
+    score&rdquo; (<a
+    href="https://platform.claude.com/docs/en/test-and-evaluate/develop-tests">Claude
+    docs</a>).</td></tr>
+    <tr><td><strong>Detailed rubric</strong></td><td>&ldquo;Vague rubrics produce
+    inconsistent judgments.&rdquo; Write it from your critiques.</td></tr>
+    <tr><td><strong>A way out</strong></td><td>Optionally allow &ldquo;Unknown&rdquo;
+    &ldquo;when it doesn't have enough information&rdquo; (Anthropic). Count Unknowns
+    separately.</td></tr>
+    <tr><td><strong>Different model</strong></td><td>Guards against self-enhancement bias.
+    Also watch for position and verbosity bias (<a
+    href="https://eugeneyan.com/writing/llm-evaluators/">Yan</a>).</td></tr>
+  </tbody>
+</table>
+
+<h2>Measuring agreement</h2>
+
+<p>Your labels are ground truth. <em>Positive</em> means a failure is present.</p>
+
+<table>
+  <thead><tr><th></th><th>Judge: pass</th><th>Judge: fail</th></tr></thead>
+  <tbody>
+    <tr><td><strong>You: pass</strong></td><td>true negative</td><td>false alarm</td></tr>
+    <tr><td><strong>You: fail</strong></td><td>missed failure</td><td>true positive</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <thead><tr><th>Metric</th><th>Formula</th><th>Answers</th></tr></thead>
+  <tbody>
+    <tr><td><strong>TPR</strong></td><td>TP / (your fails)</td><td>What fraction of real
+    failures does it catch?</td></tr>
+    <tr><td><strong>TNR</strong></td><td>TN / (your passes)</td><td>What fraction of good
+    outputs does it leave alone?</td></tr>
+    <tr><td>Raw agreement</td><td>(TP+TN) / n</td><td>Misleading when failures are rare.
+    Always-pass on a 5% failure rate scores 95% (our illustration).</td></tr>
+    <tr><td>Cohen's &kappa;</td><td>corrected for chance</td><td>One number. The
+    <a href="https://hamel.dev/blog/posts/evals-faq/">FAQ</a> uses it for agreement
+    <em>between humans</em>.</td></tr>
+  </tbody>
+</table>
+
+<p>TPR and TNR trade off against each other. &ldquo;If failures are rare, even a small
+false-alarm rate can create a lot of unnecessary reviews.&rdquo; Decide which matters more
+from what a missed failure costs.</p>
+
+<h2>How many labels</h2>
+
+<p>About 30 is enough to <em>discover</em> failure modes. To <em>validate</em> a judge:
+&ldquo;about 100 examples per failure mode, with enough Pass and Fail examples to measure
+both classes. Below 60 examples, the confidence intervals are often too wide&rdquo; (<a
+href="https://hamel.dev/blog/posts/llm-judge/">Husain</a>).</p>
+
+<h2>The sentence for a design review</h2>
+
+<p>&ldquo;On <em>n</em> hand-labelled cases (<em>f</em> fails), held out
+from tuning, the judge caught <em>x</em>/<em>f</em> failures (TPR) and wrongly flagged
+<em>y</em>/<em>p</em> good outputs (TNR = &hellip;). The caveat is &hellip;&rdquo; Always
+give n, both rates, and whether the numbers come from held-out data.</p>
+
+<footer class="colophon">
+  <div class="nav-row">
+    <a href="../lessons/0009-llm-judges.html">Lesson 09: LLM Judges</a>
+    <a href="0008-evals-reference.html">Reference: Evals</a>
+    <a href="../glossary.html">Glossary</a>
+    <a href="../index.html">Home</a>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

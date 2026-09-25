@@ -59,6 +59,27 @@ parametric memory. Communities are where wisdom gets tested.
 - [Hamel Husain: Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
   Error analysis first, then tests. The three-level framework, and the rule that an LLM judge is
   worthless until you have measured its agreement with a human. Use for: everything eval-related.
+- [Hamel Husain: Using LLM-as-a-Judge For Evaluation: A Complete Guide](https://hamel.dev/blog/posts/llm-judge/)
+  Critique shadowing: a domain expert gives binary pass/fail verdicts with written critiques,
+  and the judge prompt is iterated until it agrees with them. Includes the warning that raw
+  agreement misleads on imbalanced data (report TPR/TNR) and sizing advice (~100 labels per
+  failure mode to validate). Formerly titled "Creating a LLM-as-a-Judge That Drives Business
+  Results". Use for: building and calibrating any LLM judge.
+- [Hamel Husain & Shreya Shankar: AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
+  Binary vs Likert, TPR/TNR definitions, one judge per failure mode, dev/test splits to avoid
+  overfitting a judge prompt. Revised often, so re-check quotes before reusing them. Use for:
+  quick, sourced answers to specific eval-design questions.
+- [Shankar et al.: Who Validates the Validators?](https://arxiv.org/abs/2404.12272)
+  UIST 2024. Names *criteria drift*: you can't fully specify grading criteria before grading
+  outputs. Use for: why labelling comes before prompting, and why LLM evaluators "inherit all
+  the problems of the LLMs they evaluate".
+- [Eugene Yan: Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/)
+  A survey of the LLM-as-judge literature: position, verbosity and self-enhancement bias;
+  Cohen's κ vs percent agreement; the case for binary outputs. Use for: judge failure modes
+  and the research behind them.
+- [Claude docs: Define success criteria and build evaluations](https://platform.claude.com/docs/en/test-and-evaluate/develop-tests)
+  Anthropic's grading-method tiers (code, then LLM, then human) and tips for LLM graders:
+  detailed rubrics, empirical output, reason first. Use for: judge-prompt mechanics on Claude.
 - [Chroma: Context Rot](https://research.trychroma.com/context-rot)
   The study behind the "context rot" claim in the context engineering post — 18 LLMs, ~194k
   calls, needle-in-a-haystack variants (needle-question similarity, distractor count, haystack

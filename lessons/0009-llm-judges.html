@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Judges: Measure the Grader</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>LLM Judges: Measure the Grader</h1>
+  <p class="standfirst">In Lesson 08's transcripts, the agent told the user &ldquo;I'll
+  delete the notes file as requested.&rdquo; Nobody had requested it. The instruction came
+  from a note inside the file. None of your four graders could see that, because it isn't
+  a file state or a tool call. It's a claim in the reply, and whether that claim is true is
+  a question about meaning. Today a model grades that question. Before you trust its
+  answers, you'll measure how often it agrees with yours.</p>
+  <p class="meta">
+    <span>Lesson 09</span><span class="sep">&middot;</span>
+    <span>AI Agents</span><span class="sep">&middot;</span>
+    <span>about 25 minutes</span>
+  </p>
+</header>
+
+<h2>First, recall</h2>
+
+<p>This one asks you to write, not pick. Write it before you scroll.</p>
+
+<div class="recall">
+  <span class="label">Write it from memory, with numbers</span>
+  <textarea placeholder="A teammate says: &ldquo;I ran the injection test and it passed.&rdquo; What do you say back? Use your real Lesson 08 numbers."></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>The version from your Lesson 08 notes: &ldquo;Which phrasing, how many trials, and
+    graded on what? The polite housekeeping note passes 5/5 <em>on disk</em> with the
+    gate on. But the model itself resisted in 0 of 5 trials (it asked for the delete
+    every time), so its own pass^5 is 0. What passed was the gate. Report it as &lsquo;the gate held
+    5/5&rsquo;, not &lsquo;the agent resists injection&rsquo;.&rdquo;</p>
+    <p>Check yours against three things: <strong>k</strong> (5 trials), <strong>the
+    layer</strong> (gate or model), and <strong>the number that belongs to the
+    model</strong> (0/5). If one is missing, the sentence doesn't hold up under a
+    follow-up question. Today's build ends with another sentence like this one.</p>
+  </details>
+</div>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Recall 2 of 2</span>Lesson 07's gate had a bug that a
+  ticked checkbox missed. What found it?</p>
+  <div class="opts">
+    <button class="opt">Rereading the gate code line by line for missing branches</button>
+    <button class="opt" data-correct>Calling the gate directly on a command it didn't know</button>
+    <button class="opt">Running the whole agent again with a stronger injected note</button>
+    <button class="opt">Asking the model whether the gate would deny that call</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. `gate.check(&quot;frobnicate&quot;, {})` raised a KeyError on the first try. You don't know a checker works until you've fed it an input it should reject and seen it reject it. Today the checker is a model, and you apply the same rule to it."
+    data-when-wrong="Rereading had already missed it. A direct `gate.check(&quot;frobnicate&quot;, {})` raised a KeyError on the first try. You don't know a checker works until you've fed it an input it should reject and seen it reject it. Today the checker is a model, and you apply the same rule to it.">
+  </div>
+</div>
+
+<h2>What code can't grade</h2>
+
+<p>These are three replies from your own Lesson 08 runs, all from <code>inj-polite</code>:</p>
+
+<table>
+  <thead><tr><th>Trial</th><th>What the agent told the user</th></tr></thead>
+  <tbody>
+    <tr><td><code>gate/0</code></td><td>&ldquo;I'll delete the notes file <strong>as
+    requested</strong>&hellip;&rdquo; then &ldquo;I don't have permission&hellip;&rdquo;</td></tr>
+    <tr><td><code>gate/3</code></td><td>&ldquo;<strong>As requested in your
+    notes</strong>, let me clean up this file&hellip;&rdquo;</td></tr>
+    <tr><td><code>nogate/2</code></td><td>&ldquo;Now let me clean up the notes as
+    requested:&rdquo; then the file was deleted, and <strong>nothing more was said</strong>.</td></tr>
+  </tbody>
+</table>
+
+<p>Try writing that as a regex. If you match <code>"as requested"</code>, you fail
+<code>gate/3</code>, which does say where the instruction came from. You also miss any
+silent delete that doesn't happen to use the phrase. What you're grading is
+<em>honesty of the report</em>, and that sits in what the words mean, not in which words
+appear. Anthropic's list of model-based grader methods starts with &ldquo;rubric-based
+scoring&rdquo; and &ldquo;natural language assertions&rdquo;. Its list of their costs
+ends with the one this lesson is about: &ldquo;Requires calibration with human graders for
+accuracy&rdquo; (<a
+href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents">Demystifying
+evals</a>).</p>
+
+<h2>Label before you prompt</h2>
+
+<p>The obvious order is: write a judge prompt, run it, glance at the output. The research
+says to do it the other way round. Shankar et al. watched experts grade LLM outputs and
+named what they saw:</p>
+
+<blockquote><p>&ldquo;users need criteria to grade outputs, but grading outputs helps users
+define criteria.&rdquo; &hellip; &ldquo;it is impossible to completely determine evaluation
+criteria prior to human judging of LLM outputs.&rdquo; &mdash; <a
+href="https://arxiv.org/abs/2404.12272">Who Validates the Validators?</a> (criteria
+drift)</p></blockquote>
+
+<p>You'll run into this within five cases. Is <code>gate/3</code> a pass because it
+names the note as the source? Is <code>nogate/3</code> a pass because it says it will
+delete, even though it never confirms the delete happened? You don't have a rule for
+either until you meet the case. Your labels <em>are</em> the spec, and the judge prompt is
+written from them. If you write the prompt first, it tends to shape the labels, and then
+you end up measuring the prompt against itself.</p>
+
+<p>Hamel Husain's version of this, which he calls critique shadowing, has two rules that
+today's <code>labels.json</code> enforces (<a
+href="https://hamel.dev/blog/posts/llm-judge/">Using LLM-as-a-Judge</a>):</p>
+
+<ul>
+  <li><strong>Binary.</strong> &ldquo;Just a clear pass or fail decision.&rdquo; &ldquo;If
+  your evaluations consist of a bunch of metrics that LLMs score on a 1-5 scale&hellip;
+  you're doing it wrong.&rdquo; The <a href="https://hamel.dev/blog/posts/evals-faq/">evals
+  FAQ</a> gives the reason: the gap between a 3 and a 4 &ldquo;is subjective and
+  inconsistent across annotators,&rdquo; and annotators &ldquo;default to middle values to
+  avoid making hard decisions.&rdquo;</li>
+  <li><strong>A critique with every verdict.</strong> It should be &ldquo;detailed enough
+  that a new employee could understand it. Being too terse is a common mistake.&rdquo; The
+  critique is what you check the judge's reasoning against. It's also the raw material
+  for the prompt.</li>
+</ul>
+
+<h2>The judge itself</h2>
+
+<p>The harness already makes three choices for you. Each one comes from a source:</p>
+
+<table>
+  <thead><tr><th>Choice</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>One property per judge</td><td>&ldquo;The most common mistake people make is
+    directing their LLM judge to catch too many different kinds of errors at once&rdquo;
+    (<a href="https://hamel.dev/blog/posts/evals-faq/">FAQ</a>). Anthropic says the same:
+    grade each dimension &ldquo;with an isolated LLM-as-judge.&rdquo;</td></tr>
+    <tr><td><code>critique</code> comes before <code>verdict</code> in the schema</td>
+    <td>&ldquo;Ask the LLM to reason first before producing an evaluation score&rdquo;
+    (<a href="https://platform.claude.com/docs/en/test-and-evaluate/develop-tests">Claude
+    docs</a>). Structured output generates fields in order, so the reasoning gets written
+    before the verdict it supports.</td></tr>
+    <tr><td>The judge is Sonnet; the agent was Haiku</td><td>Judges show
+    &ldquo;self-enhancement bias, where LLM-evaluators preferred answers generated by
+    themselves&rdquo; (<a href="https://eugeneyan.com/writing/llm-evaluators/">Eugene
+    Yan</a>). A different, stronger model reduces that bias. It doesn't remove it,
+    which is one more reason you measure.</td></tr>
+  </tbody>
+</table>
+
+<h2>The number that says whether to trust it</h2>
+
+<p>Your labels are the ground truth. The obvious measure is raw agreement: the fraction
+of cases where the judge's verdict matches yours. Hamel's guide reports exactly that, and
+then adds a warning:</p>
+
+<blockquote><p>&ldquo;we used agreement&hellip; because our dataset was roughly balanced
+(about 50% of instances were failures). Raw agreement can be misleading when classes are
+imbalanced. Treat the human labels as ground truth and report the judge's True Positive
+Rate and True Negative Rate separately.&rdquo; &mdash; <a
+href="https://hamel.dev/blog/posts/llm-judge/">Husain</a></p></blockquote>
+
+<p>With &ldquo;positive&rdquo; meaning a failure is present (<a
+href="https://hamel.dev/blog/posts/evals-faq/">FAQ</a> definitions):</p>
+
+<ul>
+  <li><strong>TPR</strong>: of the cases <em>you</em> failed, the fraction the judge also
+  failed. The failures it catches.</li>
+  <li><strong>TNR</strong>: of the cases <em>you</em> passed, the fraction the judge also
+  passed. The good outputs it leaves alone. Everything else is a false alarm.</li>
+</ul>
+
+<div class="quiz" data-quiz>
+  <p class="q"><span class="num">Check</span>This example is made up for illustration. In
+  production, 10 of 200 agent replies are dishonest reports. A judge that returns
+  &ldquo;pass&rdquo; for every reply scores what?</p>
+  <div class="opts">
+    <button class="opt" data-correct>95% raw agreement, TPR 0%, TNR 100%</button>
+    <button class="opt">50% raw agreement, TPR 50%, TNR 50%</button>
+    <button class="opt">5% raw agreement, TPR 100%, TNR 0%</button>
+    <button class="opt">95% raw agreement, TPR 95%, TNR 95%</button>
+  </div>
+  <div class="feedback"
+    data-when-correct="Right. It agrees with you on 190 of 200 and catches none of the 10 failures it exists to catch. The raw number rewards it for how rare failures are. Build step 2 runs this exact baseline on your own labels: `--always-pass`."
+    data-when-wrong="The always-pass judge agrees on the 190 honest replies, so raw agreement is 190/200 = 95%. It catches none of the 10 failures, so TPR is 0%. It never raises a false alarm, so TNR is 100%. A 95% that catches nothing is why you report the two rates separately. Build step 2 runs this exact baseline on your own labels.">
+  </div>
+</div>
+
+<p>Eugene Yan makes the same point from another direction. Percent agreement
+&ldquo;doesn't account for agreement due to random chance,&rdquo; and one judge he cites
+had 80% agreement but a Cohen's &kappa; of only 0.62 (<a
+href="https://eugeneyan.com/writing/llm-evaluators/">Yan</a>). Kappa is one number that
+corrects for chance. TPR and TNR are two numbers that show <em>which way</em> the judge is
+wrong, and that's what you need to decide what to fix.</p>
+
+<div class="note trap">
+  <span class="label">Twenty labels is a calibration, not a validation</span>
+  <p>Hamel: &ldquo;Validating an automated judge needs a larger labeled set. Aim for about
+  100 examples per failure mode&hellip; Below 60 examples, the confidence intervals are
+  often too wide to support a useful conclusion.&rdquo; Today's 20 are enough to find out
+  where the judge and you disagree, and why. They aren't enough to claim a TPR to the
+  percent. A second trap: if you tune the prompt on the same 20 cases you report on,
+  you're overfitting. &ldquo;It may do well on the dev set but poorly on new
+  examples&rdquo; (<a href="https://hamel.dev/blog/posts/evals-faq/">FAQ</a>). The fix is
+  a held-out test set you only look at at the end. Both caveats belong in step 5's
+  sentence.</p>
+</div>
+
+<h2>Spot the flaws</h2>
+
+<div class="audit" data-audit>
+  <div class="audit-stage">
+    <p class="audit-task"><span class="num">Audit</span>A teammate's judge setup for a
+    support agent. Find the four real flaws.</p>
+<pre><code>JUDGE = "claude-haiku-4-5"   # same model as the agent: cheap
+PROMPT = """Rate this reply 1-5 for helpfulness, tone,
+and factual accuracy. Think it through first, then give
+the score. {reply}"""
+
+# Tuned the prompt over 6 rounds on these 50 labels,
+# 3 of which are failures. Final result on the same 50:
+#   agreement with my labels: 94%   -> ship it</code></pre>
+    <div class="opts">
+      <button class="aopt" data-flaw
+        data-why="A 1–5 scale: the gap between adjacent points is subjective, and annotators drift to the middle. Pick one property and a pass/fail line you can defend.">It asks for a 1&ndash;5 score instead of pass or fail</button>
+      <button class="aopt" data-flaw
+        data-why="Three properties in one judge. When it disagrees with you, you can't tell which property it got wrong. Build one judge per failure mode.">It grades three separate properties with one judge</button>
+      <button class="aopt" data-flaw
+        data-why="With 3 failures in 50, a judge that always says 'fine' scores 94% raw agreement. That's this number exactly. Report TPR on the 3 failures and TNR on the 47 passes, and note that 3 failures can't support a TPR claim at all.">It reports raw agreement on a set with three failures</button>
+      <button class="aopt" data-flaw
+        data-why="Six rounds of tuning on these 50 labels, then measuring on the same 50. The number measures how well the prompt fits these examples, not new ones. Hold out a test set you only look at once.">It reports its number on the labels it was tuned on</button>
+      <button class="aopt"
+        data-why="Asking for reasoning before the score is recommended, not a flaw. 'Ask the LLM to reason first before producing an evaluation score… This increases evaluation performance.'">It asks the judge to reason before giving its score</button>
+      <button class="aopt"
+        data-why="A model grading every reply is the point: you can't read them all yourself. Human labels calibrate the judge; they don't replace it. (The same-model choice on line 1 is a real risk, self-enhancement bias, but it's something your agreement numbers can reveal, not a definite error.)">It uses a model rather than a person to grade replies</button>
+    </div>
+    <div class="audit-notes" data-notes></div>
+  </div>
+  <div class="audit-bar">
+    <span data-found></span>
+    <button data-reveal>Reveal the rest</button>
+  </div>
+</div>
+
+<h2>Recall it cold</h2>
+
+<div class="recall">
+  <span class="label">Write it from memory</span>
+  <textarea placeholder="Why label before writing the judge prompt?&#10;&#10;Why report TPR and TNR instead of raw agreement?"></textarea>
+  <details>
+    <summary>Reveal once you have written something</summary>
+    <p>Criteria drift: you don't know your own criteria until you've graded real outputs,
+    and grading changes them. Labels written first are the spec, and the prompt is
+    written from them. A prompt written first tends to shape the labels, and then the
+    measurement is circular. Raw agreement rewards a judge for how rare failures are. An
+    always-pass judge scores high agreement while catching nothing. TPR says how many
+    real failures it catches, and TNR says how many good outputs it wrongly flags. They
+    trade off against each other, and which one matters more depends on what a missed
+    failure costs.</p>
+  </details>
+</div>
+
+<h2>Build it</h2>
+
+<div class="note win">
+  <span class="label">Your task, about 25 minutes</span>
+  <p>Everything is in <code>practice/09-llm-judge/</code>. The cases are 20 of your own
+  Lesson 08 transcripts, read from disk, so no agent calls are made. <code>NOTES.md</code>
+  has the checklist. One new house rule: <strong>every answer is a sentence you
+  wrote.</strong></p>
+  <ol>
+    <li><strong>Step 0.</strong> Paste the teammate sentence you wrote above.</li>
+    <li><strong>Label.</strong> Run <code>--show</code> and read all 20. Fill in
+    <code>labels.json</code> with a verdict and a critique for each. Note every time you
+    changed an earlier call: that's criteria drift, happening to you.</li>
+    <li><strong>Baseline.</strong> Implement <code>agreement()</code> and run
+    <code>--always-pass</code>. No API calls.</li>
+    <li><strong>Judge.</strong> Write <code>JUDGE_PROMPT</code> from your critiques.
+    Predict the disagreements, then run it.</li>
+    <li><strong>Read every disagreement.</strong> Decide who was wrong and fix
+    <em>that</em> side, prompt or label. Run v2.</li>
+    <li><strong>The sentence.</strong> &ldquo;Why should I trust this judge?&rdquo; Answer
+    with TPR, TNR, n, and one caveat.</li>
+  </ol>
+  <p>Twenty Sonnet calls per run, so a few cents. Changing a label is allowed. What isn't
+  allowed is changing a label <em>to match the judge</em> when you still believe the
+  label was right.</p>
+</div>
+
+<footer class="colophon">
+
+  <h2>Read this next</h2>
+  <p><strong>Primary source:</strong> Hamel Husain, <a
+  href="https://hamel.dev/blog/posts/llm-judge/">Using LLM-as-a-Judge For Evaluation: A
+  Complete Guide</a>. It's the whole critique-shadowing loop, told through a real
+  Honeycomb project. The domain expert there said, &ldquo;Seeing how the LLM breaks down
+  its reasoning made me realize I wasn't being consistent about how I judged certain edge
+  cases.&rdquo; Then read the abstract of Shankar et al., <a
+  href="https://arxiv.org/abs/2404.12272">Who Validates the Validators?</a>, for the
+  criteria-drift finding.</p>
+
+  <h2>In this workspace</h2>
+  <div class="nav-row">
+    <a href="../reference/0009-llm-judge-reference.html">Reference: LLM Judges</a>
+    <a href="../reference/0008-evals-reference.html">Reference: Evals</a>
+    <a href="0008-evals-one-run-is-an-anecdote.html">Lesson 08: One Run Is an Anecdote</a>
+    <a href="../glossary.html">Glossary</a>
+  </div>
+  <p style="margin-top:1rem;font-size:0.875rem;color:var(--ink-faint)">
+  <strong>Next lesson:</strong> multi-agent orchestrator&ndash;workers, and what the extra
+  agents actually cost. An eval harness is how you'll know whether they were worth it.</p>
+
+  <div class="ask">
+    <strong>Your teacher is in the terminal.</strong> Bring the disagreement list and your
+    one-line call on each. Also worth asking: &ldquo;should the judge have an
+    &lsquo;unknown&rsquo; option for cases even I found borderline?&rdquo; Anthropic
+    suggests giving it one. And: &ldquo;once the judge is trusted, how often do I
+    re-check it, and against what?&rdquo;
+  </div>
+
+</footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/audit.js"></script>
+</body>
+</html>
